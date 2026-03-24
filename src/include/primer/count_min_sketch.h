@@ -14,6 +14,8 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
+#include <shared_mutex>
 #include <utility>
 #include <vector>
 
@@ -85,8 +87,13 @@ class CountMinSketch {
   /** Pre-computed hash functions for each row */
   std::vector<std::function<size_t(const KeyType &)>> hash_functions_;
 
-  //用于存储二维矩阵的成员变量
+  // 用于存储二维矩阵的成员变量
   std::vector<std::vector<uint32_t>> table_;
+  // 细粒度锁：每个单元格一把读写锁
+  std::unique_ptr<std::shared_mutex[]> locks_;
+  // 全局锁：用于协调对整个 CountMinSketch 实例的访问，特别是针对 Merge 和 Clear 等全量操作。
+  // Insert 和 Count 在进行细粒度操作前会获取此锁的读锁，而 Merge 和 Clear 会获取此锁的写锁。
+  mutable std::shared_mutex global_latch_;
 
   /** @fall2025 PLEASE DO NOT MODIFY THE FOLLOWING */
   constexpr static size_t SEED_BASE = 15445;

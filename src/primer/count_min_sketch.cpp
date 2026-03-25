@@ -18,6 +18,8 @@
 #include <algorithm>
 #include <limits>
 #include <vector>
+#include<mutex>
+#include<shared_mutex>
 
 namespace bustub {
 
@@ -54,6 +56,8 @@ CountMinSketch<KeyType>::CountMinSketch(CountMinSketch &&other) noexcept : width
 
   hash_functions_ = std::move(other.hash_functions_);
   table_ = std::move(other.table_);
+  //移动locks的所有权
+  locks_=std::move(other.locks_);
 }
 
 template <typename KeyType>
@@ -61,10 +65,13 @@ auto CountMinSketch<KeyType>::operator=(CountMinSketch &&other) noexcept -> Coun
   /** @TODO(student) Implement this function! */
 
   if (this != &other) {
+    //此处locks_会在赋值时自动释放旧资源并接管新资源
     width_ = other.width_;
     depth_ = other.depth_;
     hash_functions_ = std::move(other.hash_functions_);
     table_ = std::move(other.table_);
+    // 移动 locks_ 的所有权，旧的 locks_ 会被析构。
+    locks_ = std::move(other.locks_);
   }
   return *this;
 }
@@ -73,8 +80,6 @@ template <typename KeyType>
 void CountMinSketch<KeyType>::Insert(const KeyType &item) {
   /** @TODO(student) Implement this function! */
 
-  // 先获取全局读锁，允许其他并发的 Insert 和 Count，但会阻止 Merge 或 Clear
-  std::shared_lock<std::shared_mutex> global_read_lock(global_latch_);
   // 遍历每一行，使用对应的哈希函数找到位置并 +1
   for (size_t i = 0; i < depth_; ++i) {
     size_t col = hash_functions_[i](item);
@@ -91,9 +96,14 @@ void CountMinSketch<KeyType>::Merge(const CountMinSketch<KeyType> &other) {
   }
   /** @TODO(student) Implement this function! */
 
-  // 获取全局写锁，阻止所有其他操作，确保 Merge 操作的不可分割性
-  std::unique_lock<std::shared_mutex> global_write_lock(global_latch_);
-  // 逐个位置累加，由于已经持有全局写锁，这里不需要再获取细粒度锁
+  //获取所有细粒度锁的写锁
+  std::vector<std::unique_lock<std::shared_mutex>> all_locks;
+  all_locks.reserve(depth_ * width_);
+  // 按照固定顺序获取所有锁的写锁
+  for (size_t i = 0; i < depth_ * width_; ++i) {
+      all_locks.emplace_back(locks_[i]); // 获取每个锁的独占访问
+  }
+  // 逐个位置累加
   for (size_t i = 0; i < depth_; ++i) {
     for (size_t j = 0; j < width_; ++j) {
       table_[i][j] += other.table_[i][j];
@@ -103,8 +113,6 @@ void CountMinSketch<KeyType>::Merge(const CountMinSketch<KeyType> &other) {
 
 template <typename KeyType>
 auto CountMinSketch<KeyType>::Count(const KeyType &item) const -> uint32_t {
-  // 先获取全局读锁，允许其他并发的 Insert 和 Count，但会阻止 Merge 或 Clear
-  std::shared_lock<std::shared_mutex> global_read_lock(global_latch_);
   uint32_t min_count = std::numeric_limits<uint32_t>::max();
   // 估算值是所有哈希映射位置中的最小值
   for (size_t i = 0; i < depth_; ++i) {

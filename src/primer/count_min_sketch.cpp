@@ -17,9 +17,9 @@
 
 #include <algorithm>
 #include <limits>
+#include <mutex>
+#include <shared_mutex>
 #include <vector>
-#include<mutex>
-#include<shared_mutex>
 
 namespace bustub {
 
@@ -56,8 +56,8 @@ CountMinSketch<KeyType>::CountMinSketch(CountMinSketch &&other) noexcept : width
 
   hash_functions_ = std::move(other.hash_functions_);
   table_ = std::move(other.table_);
-  //移动locks的所有权
-  locks_=std::move(other.locks_);
+  // 移动locks的所有权
+  locks_ = std::move(other.locks_);
 }
 
 template <typename KeyType>
@@ -65,7 +65,7 @@ auto CountMinSketch<KeyType>::operator=(CountMinSketch &&other) noexcept -> Coun
   /** @TODO(student) Implement this function! */
 
   if (this != &other) {
-    //此处locks_会在赋值时自动释放旧资源并接管新资源
+    // 此处locks_会在赋值时自动释放旧资源并接管新资源
     width_ = other.width_;
     depth_ = other.depth_;
     hash_functions_ = std::move(other.hash_functions_);
@@ -96,12 +96,12 @@ void CountMinSketch<KeyType>::Merge(const CountMinSketch<KeyType> &other) {
   }
   /** @TODO(student) Implement this function! */
 
-  //获取所有细粒度锁的写锁
+  // 获取所有细粒度锁的写锁
   std::vector<std::unique_lock<std::shared_mutex>> all_locks;
   all_locks.reserve(depth_ * width_);
   // 按照固定顺序获取所有锁的写锁
   for (size_t i = 0; i < depth_ * width_; ++i) {
-      all_locks.emplace_back(locks_[i]); // 获取每个锁的独占访问
+    all_locks.emplace_back(locks_[i]);  // 获取每个锁的独占访问
   }
   // 逐个位置累加
   for (size_t i = 0; i < depth_; ++i) {

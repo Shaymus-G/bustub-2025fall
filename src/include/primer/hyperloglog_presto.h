@@ -92,19 +92,6 @@ class HyperLogLogPresto {
   uint64_t cardinality_;
 
   // TODO(student) - can add more data structures as required
-
-  int16_t n_leading_bits_;//用于计算索引的位数
-  uint64_t m_;//桶的数量
-  std::vector<uint8_t> registers_;//存储每个桶的max_rank
-  uint64_t cardinality_;//估算的基数结果
-
-  //计算alpha_m系数
-  auto GetAlpha() const -> double{
-    if(m_==16) return 0.673;
-    if(m_==32) return 0.697;
-    if(m_==64) return 0.709;
-    return 0.7213/(1.0+1.079/m_);
-  }
 };
 
 }  // namespace bustub

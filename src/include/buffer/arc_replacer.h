@@ -34,6 +34,11 @@ struct FrameStatus {
   frame_id_t frame_id_;
   bool evictable_;
   ArcStatus arc_status_;
+
+  //增加迭代器，方便实现O(1)级别的删除
+  std::list<frame_id_t>::iterator alive_it_;
+  std::list<page_id_t>::iterator ghost_it_;
+
   FrameStatus(page_id_t pid, frame_id_t fid, bool ev, ArcStatus st)
       : page_id_(pid), frame_id_(fid), evictable_(ev), arc_status_(st) {}
 };
@@ -67,6 +72,9 @@ class ArcReplacer {
   std::list<page_id_t> mru_ghost_;
   std::list<page_id_t> mfu_ghost_;
 
+  //辅助函数：根据算法规则删除幽灵列表中过期页号
+  void MaintainGhostSize();
+
   /* record entries in mru_ and mfu_
    * this uses frame_id_t to guarantee no duplicate records for the same
    * frame when they are alive */
@@ -77,11 +85,11 @@ class ArcReplacer {
   std::unordered_map<page_id_t, std::shared_ptr<FrameStatus>> ghost_map_;
 
   /* alive, evictable entries count */
-  [[maybe_unused]] size_t curr_size_{0};
+  size_t curr_size_{0};
   /* p as in original paper */
-  [[maybe_unused]] size_t mru_target_size_{0};
+  size_t mru_target_size_{0};
   /* c as in original paper */
-  [[maybe_unused]] size_t replacer_size_;
+  size_t replacer_size_;
   std::mutex latch_;
 
   // TODO(student): You can add member variables / functions as you like.

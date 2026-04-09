@@ -35,7 +35,7 @@ struct FrameStatus {
   bool evictable_;
   ArcStatus arc_status_;
 
-  //增加迭代器，方便实现O(1)级别的删除
+  // 增加迭代器，方便实现O(1)级别的删除
   std::list<frame_id_t>::iterator alive_it_;
   std::list<page_id_t>::iterator ghost_it_;
 
@@ -72,7 +72,7 @@ class ArcReplacer {
   std::list<page_id_t> mru_ghost_;
   std::list<page_id_t> mfu_ghost_;
 
-  //辅助函数：根据算法规则删除幽灵列表中过期页号
+  // 辅助函数：根据算法规则删除幽灵列表中过期页号
   void MaintainGhostSize();
 
   /* record entries in mru_ and mfu_

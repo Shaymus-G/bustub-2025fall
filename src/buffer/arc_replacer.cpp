@@ -44,54 +44,48 @@ ArcReplacer::ArcReplacer(size_t num_frames) : replacer_size_(num_frames) {}
  *
  * @return frame id of the evicted frame, or std::nullopt if cannot evict
  */
-auto ArcReplacer::Evict() -> std::optional<frame_id_t> { 
-    std::lock_guard<std::mutex> lock(latch_);
-    if(curr_size_==0)
-        return std::nullopt;
-    std::shared_ptr<FrameStatus> victim_status=nullptr;
-    //若|T1|>p，优先从T1选，否则从T2选，同时若目标列表全部被Pin住了，要尝试另一边
-    bool evict_from_mru=(mru_.size()>=mru_target_size_&&!mru_.empty())||mfu_.empty();
-    //在list尾部找第一个可踢出的页
-    auto find_victim=[&](std::list<frame_id_t>& list)->bool{
-        for(auto it=list.rbegin();it!=list.rend();++it){
-            if(alive_map_[*it]->evictable_){
-                victim_status=alive_map_[*it];
-                list.erase(std::next(it).base());
-                return true;
-            }
-        }
-        return false;
-    };
-    if(evict_from_mru){
-        //MRU全被Pin住了就去MFU找
-        if(!find_victim(mru_))
-            find_victim(mfu_);
+auto ArcReplacer::Evict() -> std::optional<frame_id_t> {
+  std::lock_guard<std::mutex> lock(latch_);
+  if (curr_size_ == 0) return std::nullopt;
+  std::shared_ptr<FrameStatus> victim_status = nullptr;
+  // 若|T1|>p，优先从T1选，否则从T2选，同时若目标列表全部被Pin住了，要尝试另一边
+  bool evict_from_mru = (mru_.size() >= mru_target_size_ && !mru_.empty()) || mfu_.empty();
+  // 在list尾部找第一个可踢出的页
+  auto find_victim = [&](std::list<frame_id_t> &list) -> bool {
+    for (auto it = list.rbegin(); it != list.rend(); ++it) {
+      if (alive_map_[*it]->evictable_) {
+        victim_status = alive_map_[*it];
+        list.erase(std::next(it).base());
+        return true;
+      }
     }
-    else{
-        //同上反之
-        if(!find_victim(mfu_))
-            find_victim(mru_);
-    }
-    if(!victim_status)
-        return std::nullopt;
-    //把被踢出的移入幽灵列表
-    frame_id_t fid=victim_status->frame_id_;
-    page_id_t pid=victim_status->page_id_;
-    if(victim_status->arc_status_==ArcStatus::MRU){
-        victim_status->arc_status_=ArcStatus::MRU_GHOST;
-        mru_ghost_.push_front(pid);
-        victim_status->ghost_it_=mru_ghost_.begin();
-    }
-    else{
-        victim_status->arc_status_=ArcStatus::MFU_GHOST;
-        mfu_ghost_.push_front(pid);
-        victim_status->ghost_it_=mfu_ghost_.begin();
-    }
-    //从内存档案删除，记入幽灵档案
-    alive_map_.erase(fid);
-    ghost_map_[pid]=victim_status;
-    curr_size_--;
-    return fid;
+    return false;
+  };
+  if (evict_from_mru) {
+    // MRU全被Pin住了就去MFU找
+    if (!find_victim(mru_)) find_victim(mfu_);
+  } else {
+    // 同上反之
+    if (!find_victim(mfu_)) find_victim(mru_);
+  }
+  if (!victim_status) return std::nullopt;
+  // 把被踢出的移入幽灵列表
+  frame_id_t fid = victim_status->frame_id_;
+  page_id_t pid = victim_status->page_id_;
+  if (victim_status->arc_status_ == ArcStatus::MRU) {
+    victim_status->arc_status_ = ArcStatus::MRU_GHOST;
+    mru_ghost_.push_front(pid);
+    victim_status->ghost_it_ = mru_ghost_.begin();
+  } else {
+    victim_status->arc_status_ = ArcStatus::MFU_GHOST;
+    mfu_ghost_.push_front(pid);
+    victim_status->ghost_it_ = mfu_ghost_.begin();
+  }
+  // 从内存档案删除，记入幽灵档案
+  alive_map_.erase(fid);
+  ghost_map_[pid] = victim_status;
+  curr_size_--;
+  return fid;
 }
 
 /**
@@ -124,53 +118,52 @@ auto ArcReplacer::Evict() -> std::optional<frame_id_t> {
  * leaderboard tests.
  */
 void ArcReplacer::RecordAccess(frame_id_t frame_id, page_id_t page_id, [[maybe_unused]] AccessType access_type) {
-    //case1:命中内存（T1或T2）
-    if(alive_map_.count(frame_id)){
-        auto status=alive_map_[frame_id];
-        //从当前列表移除
-        if(status->arc_status_==ArcStatus::MRU){
-            mru_.erase(status->alive_it_);
-        }
-        else{
-            mfu_.erase(status->alive_it_);
-        }
-        //统一进入T2头部
-        status->arc_status_=ArcStatus::MFU;
-        mfu_.push_front(frame_id);
-        status->alive_it_=mfu_.begin();
-        return;
+  // case1:命中内存（T1或T2）
+  if (alive_map_.count(frame_id)) {
+    auto status = alive_map_[frame_id];
+    // 从当前列表移除
+    if (status->arc_status_ == ArcStatus::MRU) {
+      mru_.erase(status->alive_it_);
+    } else {
+      mfu_.erase(status->alive_it_);
     }
-    //case2/3:命中了幽灵列表
-    if(ghost_map_.count(page_id)){
-        auto status=ghost_map_[page_id];
-        //命中B1：说明MRU需要更多空间，增大p
-        if(status->arc_status_==ArcStatus::MRU_GHOST){
-            size_t delta=(mfu_ghost_.empty())?1:std::max((size_t)1,mfu_ghost_.size()/mru_ghost_.size());
-            mru_target_size_=std::min(replacer_size_,mru_target_size_+delta);
-            mru_ghost_.erase(status->ghost_it_);
-        }
-        //命中B2：说明MFU需要更多空间，减小p
-        else{
-            size_t delta=(mru_ghost_.empty())?1:std::max((size_t)1,mru_ghost_.size()/mfu_ghost_.size());
-            mru_target_size_=(mru_target_size_>=delta)?(mru_target_size_-delta):0;
-            mfu_ghost_.erase(status->ghost_it_);
-        }
-        //从幽灵列表移除
-        ghost_map_.erase(page_id);
-        //创建新状态放入MFU
-        auto new_status=std::make_shared<FrameStatus>(page_id,frame_id,false,ArcStatus::MFU);
-        mfu_.push_front(frame_id);
-        new_status->alive_it_=mfu_.begin();
-        alive_map_[frame_id]=new_status;
-        return;
+    // 统一进入T2头部
+    status->arc_status_ = ArcStatus::MFU;
+    mfu_.push_front(frame_id);
+    status->alive_it_ = mfu_.begin();
+    return;
+  }
+  // case2/3:命中了幽灵列表
+  if (ghost_map_.count(page_id)) {
+    auto status = ghost_map_[page_id];
+    // 命中B1：说明MRU需要更多空间，增大p
+    if (status->arc_status_ == ArcStatus::MRU_GHOST) {
+      size_t delta = (mfu_ghost_.empty()) ? 1 : std::max((size_t)1, mfu_ghost_.size() / mru_ghost_.size());
+      mru_target_size_ = std::min(replacer_size_, mru_target_size_ + delta);
+      mru_ghost_.erase(status->ghost_it_);
     }
-    //case4:完全未命中
-    //按照原论文，此处要维护幽灵列表的大小
-    MaintainGhostSize();
-    auto new_status=std::make_shared<FrameStatus>(page_id,frame_id,false,ArcStatus::MRU);
-    mru_.push_front(frame_id);
-    new_status->alive_it_=mru_.begin();
-    alive_map_[frame_id]=new_status;
+    // 命中B2：说明MFU需要更多空间，减小p
+    else {
+      size_t delta = (mru_ghost_.empty()) ? 1 : std::max((size_t)1, mru_ghost_.size() / mfu_ghost_.size());
+      mru_target_size_ = (mru_target_size_ >= delta) ? (mru_target_size_ - delta) : 0;
+      mfu_ghost_.erase(status->ghost_it_);
+    }
+    // 从幽灵列表移除
+    ghost_map_.erase(page_id);
+    // 创建新状态放入MFU
+    auto new_status = std::make_shared<FrameStatus>(page_id, frame_id, false, ArcStatus::MFU);
+    mfu_.push_front(frame_id);
+    new_status->alive_it_ = mfu_.begin();
+    alive_map_[frame_id] = new_status;
+    return;
+  }
+  // case4:完全未命中
+  // 按照原论文，此处要维护幽灵列表的大小
+  MaintainGhostSize();
+  auto new_status = std::make_shared<FrameStatus>(page_id, frame_id, false, ArcStatus::MRU);
+  mru_.push_front(frame_id);
+  new_status->alive_it_ = mru_.begin();
+  alive_map_[frame_id] = new_status;
 }
 
 /**
@@ -191,23 +184,20 @@ void ArcReplacer::RecordAccess(frame_id_t frame_id, page_id_t page_id, [[maybe_u
  * @param set_evictable whether the given frame is evictable or not
  */
 void ArcReplacer::SetEvictable(frame_id_t frame_id, bool set_evictable) {
-    std::lock_guard<std::mutex> lock(latch_);
-    //若frame_id根本不在内存里就无需处理
-    auto it=alive_map_.find(frame_id);
-    if(it==alive_map_.end())
-        return;
-    auto status=it->second;
-    //状态没变无需处理
-    if(status->evictable_==set_evictable)
-        return;
-    //更新状态
-    status->evictable_=set_evictable;
-    if(set_evictable){
-        curr_size_++;
-    }
-    else{
-        curr_size_--;
-    }
+  std::lock_guard<std::mutex> lock(latch_);
+  // 若frame_id根本不在内存里就无需处理
+  auto it = alive_map_.find(frame_id);
+  if (it == alive_map_.end()) return;
+  auto status = it->second;
+  // 状态没变无需处理
+  if (status->evictable_ == set_evictable) return;
+  // 更新状态
+  status->evictable_ = set_evictable;
+  if (set_evictable) {
+    curr_size_++;
+  } else {
+    curr_size_--;
+  }
 }
 
 /**
@@ -227,21 +217,20 @@ void ArcReplacer::SetEvictable(frame_id_t frame_id, bool set_evictable) {
  * @param frame_id id of frame to be removed
  */
 void ArcReplacer::Remove(frame_id_t frame_id) {
-    std::lock_guard<std::mutex> lock(latch_);
-    if(alive_map_.count(frame_id)){
-        auto status=alive_map_[frame_id];
-        //若不可被踢出则报错
-        if(!status->evictable_)
-            throw std::runtime_error("Remove non-evictable frame");
-        //从T1或T2中删除
-        if(status->arc_status_==ArcStatus::MRU)
-            mru_.erase(status->alive_it_);
-        else
-            mfu_.erase(status->alive_it_);
-        //从内存档案中删除
-        alive_map_.erase(frame_id);
-        curr_size_--;
-    }
+  std::lock_guard<std::mutex> lock(latch_);
+  if (alive_map_.count(frame_id)) {
+    auto status = alive_map_[frame_id];
+    // 若不可被踢出则报错
+    if (!status->evictable_) throw std::runtime_error("Remove non-evictable frame");
+    // 从T1或T2中删除
+    if (status->arc_status_ == ArcStatus::MRU)
+      mru_.erase(status->alive_it_);
+    else
+      mfu_.erase(status->alive_it_);
+    // 从内存档案中删除
+    alive_map_.erase(frame_id);
+    curr_size_--;
+  }
 }
 
 /**
@@ -252,31 +241,30 @@ void ArcReplacer::Remove(frame_id_t frame_id) {
  * @return size_t
  */
 auto ArcReplacer::Size() -> size_t {
-    std::lock_guard<std::mutex> lock(latch_);
-    return curr_size_;
+  std::lock_guard<std::mutex> lock(latch_);
+  return curr_size_;
 }
 
-void ArcReplacer::MaintainGhostSize(){
-    size_t t1=mru_.size();
-    size_t t2=mfu_.size();
-    size_t b1=mru_ghost_.size();
-    size_t b2=mfu_ghost_.size();
-    //若T1+B1超过了最大容量，就删去B1里最后一个页面
-    if(t1+b1>=replacer_size_){
-        if(!mru_ghost_.empty()){
-            ghost_map_.erase(mru_ghost_.back());
-            mru_ghost_.pop_back();
-        }
-        //T1自己占满内存的情况会在Evict函数中被处理，此处无需处理
+void ArcReplacer::MaintainGhostSize() {
+  size_t t1 = mru_.size();
+  size_t t2 = mfu_.size();
+  size_t b1 = mru_ghost_.size();
+  size_t b2 = mfu_ghost_.size();
+  // 若T1+B1超过了最大容量，就删去B1里最后一个页面
+  if (t1 + b1 >= replacer_size_) {
+    if (!mru_ghost_.empty()) {
+      ghost_map_.erase(mru_ghost_.back());
+      mru_ghost_.pop_back();
     }
-    else if(t1+t2+b1+b2>=replacer_size_){
-        if(t1+t2+b1+b2>=2*replacer_size_){
-            if(!mfu_ghost_.empty()){
-                ghost_map_.erase(mfu_ghost_.back());
-                mfu_ghost_.pop_back();
-            }
-        }
+    // T1自己占满内存的情况会在Evict函数中被处理，此处无需处理
+  } else if (t1 + t2 + b1 + b2 >= replacer_size_) {
+    if (t1 + t2 + b1 + b2 >= 2 * replacer_size_) {
+      if (!mfu_ghost_.empty()) {
+        ghost_map_.erase(mfu_ghost_.back());
+        mfu_ghost_.pop_back();
+      }
     }
+  }
 }
 
 }  // namespace bustub

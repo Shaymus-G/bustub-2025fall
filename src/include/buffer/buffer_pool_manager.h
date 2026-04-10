@@ -95,6 +95,9 @@ class FrameHeader {
    * currently storing. This might allow you to skip searching for the corresponding (page ID, frame ID) pair somewhere
    * else in the buffer pool manager...
    */
+
+  // 记录当前存储的页ID
+  page_id_t page_id_{INVALID_PAGE_ID};
 };
 
 /**
@@ -171,5 +174,10 @@ class BufferPoolManager {
    * stored inside of it. Additionally, you may also want to implement a helper function that returns either a shared
    * pointer to a `FrameHeader` that already has a page's data stored inside of it, or an index to said `FrameHeader`.
    */
+
+  /** @brief 获取一个可用的 Frame。若驱逐了脏页，内部负责同步写回。 */
+  auto GetAvailableFrame() -> frame_id_t;
+  /** @brief 将特定 Frame 的数据同步写入磁盘。 */
+  void SyncFlush(frame_id_t frame_id, page_id_t page_id);
 };
 }  // namespace bustub

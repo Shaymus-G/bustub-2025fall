@@ -120,7 +120,9 @@ auto BufferPoolManager::Size() const -> size_t { return num_frames_; }
 auto BufferPoolManager::NewPage() -> page_id_t {
   std::scoped_lock lock(*bpm_latch_);
   frame_id_t fid = GetAvailableFrame();
-  if (fid == -1) return INVALID_PAGE_ID;
+  if (fid == -1) {
+    return INVALID_PAGE_ID;
+  }
   page_id_t pid = next_page_id_++;
   auto frame = frames_[fid];
   frame->Reset();
@@ -155,11 +157,15 @@ auto BufferPoolManager::NewPage() -> page_id_t {
  */
 auto BufferPoolManager::DeletePage(page_id_t page_id) -> bool {
   std::scoped_lock<std::mutex> lock(*bpm_latch_);
-  if (page_table_.find(page_id) == page_table_.end()) return true;
+  if (page_table_.find(page_id) == page_table_.end()) {
+    return true;
+  }
   frame_id_t fid = page_table_[page_id];
   auto frame = frames_[fid];
   // 如果页面正在被使用，不能删除
-  if (frame->pin_count_ > 0) return false;
+  if (frame->pin_count_ > 0) {
+    return false;
+  }
   page_table_.erase(page_id);
   replacer_->Remove(fid);
   free_frames_.push_back(fid);
@@ -210,7 +216,7 @@ auto BufferPoolManager::DeletePage(page_id_t page_id) -> bool {
 auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_type) -> std::optional<WritePageGuard> {
   std::unique_lock<std::mutex> lock(*bpm_latch_);
   frame_id_t fid;
-  if (page_table_.count(page_id)) {
+  if (page_table_.count(page_id) != 0) {
     fid = page_table_[page_id];
   } else {
     fid = GetAvailableFrame();
@@ -263,11 +269,13 @@ auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_ty
 auto BufferPoolManager::CheckedReadPage(page_id_t page_id, AccessType access_type) -> std::optional<ReadPageGuard> {
   std::unique_lock<std::mutex> lock(*bpm_latch_);
   frame_id_t fid;
-  if (page_table_.count(page_id)) {
+  if (page_table_.count(page_id) != 0) {
     fid = page_table_[page_id];
   } else {
     fid = GetAvailableFrame();
-    if (fid == -1) return std::nullopt;
+    if (fid == -1) {
+      return std::nullopt;
+    }
     // 发起磁盘读取
     auto promise = disk_scheduler_->CreatePromise();
     auto future = promise.get_future();

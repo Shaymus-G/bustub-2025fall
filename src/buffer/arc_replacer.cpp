@@ -126,6 +126,7 @@ auto ArcReplacer::Evict() -> std::optional<frame_id_t> {
  * leaderboard tests.
  */
 void ArcReplacer::RecordAccess(frame_id_t frame_id, page_id_t page_id, [[maybe_unused]] AccessType access_type) {
+  std::scoped_lock<std::mutex> lock(latch_);
   // case1:命中内存（T1或T2）
   if (alive_map_.count(frame_id) != 0) {
     auto status = alive_map_[frame_id];

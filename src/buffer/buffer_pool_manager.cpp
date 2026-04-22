@@ -129,6 +129,8 @@ auto BufferPoolManager::NewPage() -> page_id_t {
   frame->page_id_ = pid;
   // NewPage只是分配ID，不持有Pin
   frame->pin_count_ = 0;
+  // 新页面必须标记为脏，否则永远不会被写回磁盘
+  frame->is_dirty_ = true;
   page_table_[pid] = fid;
   // NewPage默认access_type为Unknown
   replacer_->RecordAccess(fid, pid, AccessType::Unknown);
@@ -235,6 +237,7 @@ auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_ty
   }
   auto frame = frames_[fid];
   frame->pin_count_++;
+  frame->is_dirty_ = true;  // 显式标记
   replacer_->RecordAccess(fid, page_id, access_type);
   replacer_->SetEvictable(fid, false);
   lock.unlock();           // 释放全局BPM锁

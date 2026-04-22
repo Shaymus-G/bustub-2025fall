@@ -195,7 +195,12 @@ WritePageGuard::WritePageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> f
       replacer_(std::move(replacer)),
       bpm_latch_(std::move(bpm_latch)),
       disk_scheduler_(std::move(disk_scheduler)),
-      is_valid_(true) {}
+      is_valid_(true) {
+  // 一旦获取了写保护器，就说明页面将会被修改，立即标记为脏
+  if (frame_ != nullptr) {
+    frame_->is_dirty_ = true;
+  }
+}
 
 /**
  * @brief The move constructor for `WritePageGuard`.

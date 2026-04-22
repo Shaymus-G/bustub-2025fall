@@ -239,8 +239,7 @@ void ArcReplacer::Remove(frame_id_t frame_id) {
     // 从T1或T2中删除
     if (status->arc_status_ == ArcStatus::MRU) {
       mru_.erase(status->alive_it_);
-    }
-    else {
+    } else {
       mfu_.erase(status->alive_it_);
     }
     // 从内存档案中删除

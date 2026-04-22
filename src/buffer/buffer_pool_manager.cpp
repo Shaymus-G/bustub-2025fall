@@ -407,9 +407,8 @@ auto BufferPoolManager::FlushPage(page_id_t page_id) -> bool {
   auto frame = frames_[fid];
   // 获取锁以确保刷新的是一致的状态
   std::scoped_lock frame_lock(frame->rwlatch_);
-  if (frame->is_dirty_) {
-    SyncFlush(fid, page_id);
-  }
+  // 去掉 is_dirty 检查，强制刷新，这样可以确保 WritePageGuard 存活期间的多次 Flush 都能生效
+  SyncFlush(fid, page_id);
   return true;
 }
 
@@ -452,9 +451,7 @@ void BufferPoolManager::FlushAllPages() {
   for (const auto &[pid, fid] : page_table_) {
     auto frame = frames_[fid];
     std::scoped_lock frame_lock(frame->rwlatch_);
-    if (frame->is_dirty_) {
-      SyncFlush(fid, pid);
-    }
+    SyncFlush(fid, pid);
   }
 }
 

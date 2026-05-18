@@ -128,6 +128,12 @@ template <typename KeyType>
 void CountMinSketch<KeyType>::Clear() {
   /** @TODO(student) Implement this function! */
 
+  std::vector<std::unique_lock<std::shared_mutex>> all_locks;
+  all_locks.reserve(depth_ * width_);
+  // 按照固定顺序获取所有锁的写锁
+  for (size_t i = 0; i < depth_ * width_; ++i) {
+    all_locks.emplace_back(locks_[i]);
+  }
   // 重置表格为 0,由于已经持有全局写锁，这里不需要再获取细粒度锁
   for (auto &row : table_) {
     std::fill(row.begin(), row.end(), 0);
@@ -146,7 +152,7 @@ auto CountMinSketch<KeyType>::TopK(uint16_t k, const std::vector<KeyType> &candi
   for (const auto &item : candidates) {
     counts.push_back({item, Count(item)});
   }
-  // 2. 按频率从高到低排序，如果频率相同可以按 Key 排序（可选，保持稳定性）
+  // 2. 按频率从高到低排序，如果频率相同可以按 Key 排序
   std::sort(counts.begin(), counts.end(), [](const auto &a, const auto &b) {
     return a.second > b.second;  // 降序
   });

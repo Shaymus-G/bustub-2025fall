@@ -64,6 +64,8 @@ class BPlusTreeInternalPage : public BPlusTreePage {
 
   auto ValueAt(int index) const -> ValueType;
 
+  // 用于后续 split、创建新 root、向 parent 插入新孩子时修改 child 指针
+  void SetValueAt(int index, const ValueType &value);
   /**
    * @brief For test only, return a string representing all keys in
    * this internal page, formatted as "(key1,key2,key3,...)"

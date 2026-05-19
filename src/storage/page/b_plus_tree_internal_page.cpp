@@ -31,7 +31,12 @@ namespace bustub {
  * @param max_size Maximal size of the page
  */
 INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_INTERNAL_PAGE_TYPE::Init(int max_size) { UNIMPLEMENTED("TODO(P2): Add implementation."); }
+void B_PLUS_TREE_INTERNAL_PAGE_TYPE::Init(int max_size) {
+  // 初始化公共 header
+  SetPageType(IndexPageType::INTERNAL_PAGE);
+  SetSize(0);
+  SetMaxSize(max_size);
+}
 
 /**
  * @brief Helper method to get/set the key associated with input "index"(a.k.a
@@ -42,7 +47,10 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::Init(int max_size) { UNIMPLEMENTED("TODO(P2
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::KeyAt(int index) const -> KeyType {
-  UNIMPLEMENTED("TODO(P2): Add implementation.");
+  // KeyAt(0) 在语义上是 invalid key，但它仍然是数组中的合法位置，故这里允许 index == 0，查找逻辑中再主动跳过它
+  assert(index >= 0);
+  assert(index < GetSize());
+  return key_array_[index];
 }
 
 /**
@@ -53,7 +61,9 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::KeyAt(int index) const -> KeyType {
  */
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetKeyAt(int index, const KeyType &key) {
-  UNIMPLEMENTED("TODO(P2): Add implementation.");
+  assert(index >= 0);
+  assert(index < GetMaxSize());
+  key_array_[index] = key;
 }
 
 /**
@@ -65,7 +75,29 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetKeyAt(int index, const KeyType &key) {
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::ValueAt(int index) const -> ValueType {
-  UNIMPLEMENTED("TODO(P2): Add implementation.");
+  // internal page 的 value 是 child page_id，与 key 不同，ValueAt(0) 是有效的第一个孩子指针
+  assert(index >= 0);
+  assert(index < GetSize());
+  return page_id_array_[index];
+}
+
+INDEX_TEMPLATE_ARGUMENTS
+void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetValueAt(int index, const ValueType &value) {
+  // SetValueAt 用于设置 child page_id
+  assert(index >= 0);
+  assert(index < GetMaxSize());
+  page_id_array_[index] = value;
+}
+
+INDEX_TEMPLATE_ARGUMENTS
+auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::ValueIndex(const ValueType &value) const -> int {
+  // 在 parent 中根据 child page_id 找孩子下标，找不到时返回 -1，由上层逻辑决定 assert 或直接处理异常情况。
+  for (int i = 0; i < GetSize(); i++) {
+    if (page_id_array_[i] == value) {
+      return i;
+    }
+  }
+  return -1;
 }
 
 // valuetype for internalNode should be page id_t

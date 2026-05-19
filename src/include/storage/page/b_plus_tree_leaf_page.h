@@ -74,6 +74,22 @@ class BPlusTreeLeafPage : public BPlusTreePage {
   void SetNextPageId(page_id_t next_page_id);
   auto KeyAt(int index) const -> KeyType;
 
+  // 获取指定位置的 RID
+  auto ValueAt(int index) const -> ValueType;
+  // 设置指定位置的 key
+  void SetKeyAt(int index, const KeyType &key);
+  // 设置指定位置的 value
+  void SetValueAt(int index, const ValueType &value);
+  // 返回当前 tombstone buffer 中记录的删除项数量，用于判断逻辑删除是否已经缓存满
+  auto GetNumTombstones() const -> size_t;
+  // 判断物理数组中的某个下标是否已经被 tombstone 标记删除
+  auto IsTombstoned(int index) const -> bool;
+  // 将某个物理下标加入 tombstone buffer，若 tombstone buffer 已满，则先物理删除最旧 tombstone
+  void AddTombstone(int index);
+  // 在指定位置插入一个 key/value，并维护已有 tombstone 下标
+  void InsertAt(int index, const KeyType &key, const ValueType &value);
+  // 物理删除指定位置的 key/value，并维护 tombstone buffer 中保存的下标
+  void DeleteAt(int index);
   /**
    * @brief for test only return a string representing all keys in
    * this leaf page formatted as "(tombkey1, tombkey2, ...|key1,key2,key3,...)"
@@ -118,6 +134,9 @@ class BPlusTreeLeafPage : public BPlusTreePage {
   KeyType key_array_[LEAF_PAGE_SLOT_CNT];
   ValueType rid_array_[LEAF_PAGE_SLOT_CNT];
   // (Spring 2025) Feel free to add more fields and helper functions below if needed
+
+  // 删除 tombstone buffer 中第 tombstone_pos 个记录
+  void RemoveTombstoneAt(size_t tombstone_pos);
 };
 
 }  // namespace bustub

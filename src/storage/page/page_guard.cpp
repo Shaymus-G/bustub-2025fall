@@ -279,6 +279,8 @@ auto WritePageGuard::GetData() const -> const char * {
  */
 auto WritePageGuard::GetDataMut() -> char * {
   BUSTUB_ENSURE(is_valid_, "tried to use an invalid write guard");
+  // 只要用户取得可写指针，就认为页面可能被修改，保守地标记为脏页。
+  frame_->is_dirty_ = true;
   return frame_->GetDataMut();
 }
 
@@ -296,16 +298,18 @@ auto WritePageGuard::IsDirty() const -> bool {
  * TODO(P1): Add implementation.
  */
 void WritePageGuard::Flush() {
-  if (is_valid_ && frame_->is_dirty_) {
-    auto promise = disk_scheduler_->CreatePromise();
-    auto future = promise.get_future();
-    DiskRequest req{true, frame_->GetDataMut(), page_id_, std::move(promise)};
-    std::vector<DiskRequest> reqs;
-    reqs.push_back(std::move(req));
-    disk_scheduler_->Schedule(reqs);
-    future.get();
-    frame_->is_dirty_ = false;
+  if (!is_valid_) {
+    return;
   }
+  // 显式 Flush 必须把当前内存页内容强制同步到磁盘，不能仅依赖 dirty bit 判断
+  auto promise = disk_scheduler_->CreatePromise();
+  auto future = promise.get_future();
+  DiskRequest req{true, frame_->GetDataMut(), page_id_, std::move(promise)};
+  std::vector<DiskRequest> reqs;
+  reqs.push_back(std::move(req));
+  disk_scheduler_->Schedule(reqs);
+  future.get();
+  frame_->is_dirty_ = false;
 }
 
 /**
@@ -331,8 +335,7 @@ void WritePageGuard::Drop() {
       replacer_->SetEvictable(frame_->frame_id_, true);
     }
   }
-  // Drop时默认数据已修改，标记为脏页
-  frame_->is_dirty_ = true;
+
   frame_->rwlatch_.unlock();
   is_valid_ = false;
 }

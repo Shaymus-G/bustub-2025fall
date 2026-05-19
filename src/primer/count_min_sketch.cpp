@@ -80,11 +80,26 @@ template <typename KeyType>
 void CountMinSketch<KeyType>::Insert(const KeyType &item) {
   /** @TODO(student) Implement this function! */
 
-  // 遍历每一行，使用对应的哈希函数找到位置并 +1
+  // 确定所有要获取的锁的索引
+  std::vector<size_t> lock_indices;
+  lock_indices.reserve(depth_);
   for (size_t i = 0; i < depth_; ++i) {
     size_t col = hash_functions_[i](item);
-    // 对当前要修改的那个单元格获取局部的写锁，只保护一个 table_[i][col] 单元格
-    std::unique_lock<std::shared_mutex> cell_lock(locks_[i * width_ + col]);
+    lock_indices.push_back(i * width_ + col);
+  }
+  // 对锁索引进行排序，以固定顺序获取锁，防止死锁
+  std::sort(lock_indices.begin(), lock_indices.end());
+  // 如果某个item的哈希结果导致不同行的col相同，排序后会有重复索引，std::unique 可以在排序后移除重复项
+  lock_indices.erase(std::unique(lock_indices.begin(), lock_indices.end()), lock_indices.end());
+  // 获取所有需要的写锁
+  std::vector<std::unique_lock<std::shared_mutex>> acquired_locks;
+  acquired_locks.reserve(lock_indices.size());
+  for (size_t index : lock_indices) {
+    acquired_locks.emplace_back(locks_[index]);  // 获取每个锁的独占访问
+  }
+  // 确保所有锁都获取后，再进行实际的计数更新
+  for (size_t i = 0; i < depth_; ++i) {
+    size_t col = hash_functions_[i](item);  // 重新计算索引，确保正确对应
     table_[i][col]++;
   }
 }

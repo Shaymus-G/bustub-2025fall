@@ -369,14 +369,12 @@ auto BufferPoolManager::ReadPage(page_id_t page_id, AccessType access_type) -> R
  * @return `false` if the page could not be found in the page table; otherwise, `true`.
  */
 auto BufferPoolManager::FlushPageUnsafe(page_id_t page_id) -> bool {
-  // 此函数不获取页锁，可能导致写出的数据状态不一致
+  std::scoped_lock<std::mutex> lock(*bpm_latch_);
   if (page_table_.find(page_id) == page_table_.end()) {
     return false;
   }
   frame_id_t fid = page_table_[page_id];
-  if (frames_[fid]->is_dirty_) {
-    SyncFlush(fid, page_id);
-  }
+  SyncFlush(fid, page_id);
   return true;
 }
 
@@ -428,9 +426,7 @@ auto BufferPoolManager::FlushPage(page_id_t page_id) -> bool {
 void BufferPoolManager::FlushAllPagesUnsafe() {
   std::scoped_lock lock(*bpm_latch_);
   for (const auto &[pid, fid] : page_table_) {
-    if (frames_[fid]->is_dirty_) {
-      SyncFlush(fid, pid);
-    }
+    SyncFlush(fid, pid);
   }
 }
 

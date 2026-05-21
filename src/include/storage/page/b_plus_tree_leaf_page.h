@@ -76,12 +76,18 @@ class BPlusTreeLeafPage : public BPlusTreePage {
 
   // 获取指定位置的 RID
   auto ValueAt(int index) const -> ValueType;
+  // 返回指定位置 key 的常量引用，供 IndexIterator::operator* 返回稳定引用
+  auto KeyAtRef(int index) const -> const KeyType &;
+  // 返回指定位置 value 的常量引用，供 IndexIterator::operator* 返回稳定引用
+  auto ValueAtRef(int index) const -> const ValueType &;
   // 设置指定位置的 key
   void SetKeyAt(int index, const KeyType &key);
   // 设置指定位置的 value
   void SetValueAt(int index, const ValueType &value);
   // 返回当前 tombstone buffer 中记录的删除项数量，用于判断逻辑删除是否已经缓存满
   auto GetNumTombstones() const -> size_t;
+  // 返回当前 leaf page 的 tombstone buffer 最大容量
+  auto GetMaxTombstones() const -> size_t;
   // 判断物理数组中的某个下标是否已经被 tombstone 标记删除
   auto IsTombstoned(int index) const -> bool;
   // 将某个物理下标加入 tombstone buffer，若 tombstone buffer 已满，则先物理删除最旧 tombstone
@@ -90,6 +96,21 @@ class BPlusTreeLeafPage : public BPlusTreePage {
   void InsertAt(int index, const KeyType &key, const ValueType &value);
   // 物理删除指定位置的 key/value，并维护 tombstone buffer 中保存的下标
   void DeleteAt(int index);
+  // 移除指定物理下标对应的 tombstone 标记，用于重新插入一个已经被逻辑删除的 key
+  auto RemoveTombstoneForIndex(int index) -> bool;
+  // 将当前 leaf 中所有 pending tombstone 物理应用掉，便于 split 前简化数组状态
+  void ApplyAllTombstones();
+  // 返回 tombstone buffer 当前保存的第 pos 个物理下标，用于 borrow/coalesce 时把 tombstone 从 source leaf 转移到 destination leaf
+  auto TombstoneAt(size_t pos) const -> size_t;
+  // 向 tombstone buffer 追加一个已经确定的物理下标，用于搬移已有 tombstone
+  void AppendTombstone(size_t index);
+  // 清空当前 leaf 的 tombstone buffer，用于 source leaf 被 coalesce 后避免残留状态干扰调试
+  void ClearTombstones();
+  // 按 key 查找当前物理下标并追加 tombstone
+  void AddTombstoneByKey(const KeyType &key, const KeyComparator &comparator);
+  // 返回当前 leaf 中对外可见的 entry 数量
+  auto GetNumVisibleEntries() const -> int;
+
   /**
    * @brief for test only return a string representing all keys in
    * this leaf page formatted as "(tombkey1, tombkey2, ...|key1,key2,key3,...)"

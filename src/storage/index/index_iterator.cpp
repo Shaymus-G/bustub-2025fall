@@ -27,18 +27,69 @@ FULL_INDEX_TEMPLATE_ARGUMENTS
 INDEXITERATOR_TYPE::IndexIterator() = default;
 
 FULL_INDEX_TEMPLATE_ARGUMENTS
-INDEXITERATOR_TYPE::~IndexIterator() = default;  // NOLINT
-
-FULL_INDEX_TEMPLATE_ARGUMENTS
-auto INDEXITERATOR_TYPE::IsEnd() -> bool { UNIMPLEMENTED("TODO(P2): Add implementation."); }
-
-FULL_INDEX_TEMPLATE_ARGUMENTS
-auto INDEXITERATOR_TYPE::operator*() -> std::pair<const KeyType &, const ValueType &> {
-  UNIMPLEMENTED("TODO(P2): Add implementation.");
+INDEXITERATOR_TYPE::IndexIterator(std::shared_ptr<TracedBufferPoolManager> bpm, ReadPageGuard leaf_guard, int index)
+    : bpm_(std::move(bpm)), leaf_guard_(std::move(leaf_guard)), index_(index), is_end_(false) {
+  // 构造后立即跳过 tombstone，保证 iterator 指向的是对外可见的 entry
+  SkipTombstones();
 }
 
 FULL_INDEX_TEMPLATE_ARGUMENTS
-auto INDEXITERATOR_TYPE::operator++() -> INDEXITERATOR_TYPE & { UNIMPLEMENTED("TODO(P2): Add implementation."); }
+INDEXITERATOR_TYPE::~IndexIterator() = default;  // NOLINT
+
+FULL_INDEX_TEMPLATE_ARGUMENTS
+auto INDEXITERATOR_TYPE::IsEnd() -> bool {
+  // end iterator 不持有有效 leaf 位置
+  return is_end_;
+}
+
+FULL_INDEX_TEMPLATE_ARGUMENTS
+auto INDEXITERATOR_TYPE::operator*() -> std::pair<const KeyType &, const ValueType &> {
+  // 解引用只能发生在非 end iterator 上
+  assert(!is_end_);
+  using LeafPage = BPlusTreeLeafPage<KeyType, ValueType, KeyComparator, NumTombs>;
+  auto leaf_page = leaf_guard_.template As<LeafPage>();
+  assert(index_ >= 0);
+  assert(index_ < leaf_page->GetSize());
+  assert(!leaf_page->IsTombstoned(index_));
+  return std::pair<const KeyType &, const ValueType &>(leaf_page->KeyAtRef(index_), leaf_page->ValueAtRef(index_));
+}
+
+FULL_INDEX_TEMPLATE_ARGUMENTS
+auto INDEXITERATOR_TYPE::operator++() -> INDEXITERATOR_TYPE & {
+  // end iterator 自增仍保持 end
+  if (is_end_) {
+    return *this;
+  }
+  index_++;
+  SkipTombstones();
+  return *this;
+}
+
+FULL_INDEX_TEMPLATE_ARGUMENTS
+void INDEXITERATOR_TYPE::SkipTombstones() {
+  // 跳过 tombstone；如果当前 leaf 到尾，则读取下一个 leaf
+  while (!is_end_) {
+    using LeafPage = BPlusTreeLeafPage<KeyType, ValueType, KeyComparator, NumTombs>;
+    while (!is_end_) {
+      auto leaf_page = leaf_guard_.template As<LeafPage>();
+      while (index_ < leaf_page->GetSize() && leaf_page->IsTombstoned(index_)) {
+        index_++;
+      }
+      if (index_ < leaf_page->GetSize()) {
+        return;
+      }
+      page_id_t next_page_id = leaf_page->GetNextPageId();
+      if (next_page_id == INVALID_PAGE_ID) {
+        leaf_guard_.Drop();
+        is_end_ = true;
+        index_ = 0;
+        return;
+      }
+      leaf_guard_ = bpm_->ReadPage(next_page_id);
+      index_ = 0;
+    }
+  }
+}
 
 template class IndexIterator<GenericKey<4>, RID, GenericComparator<4>>;
 

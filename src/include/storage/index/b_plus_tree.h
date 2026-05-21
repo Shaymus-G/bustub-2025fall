@@ -75,7 +75,7 @@ class Context {
 FULL_INDEX_TEMPLATE_ARGUMENTS_DEFN
 class BPlusTree {
   using InternalPage = BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator>;
-  using LeafPage = BPlusTreeLeafPage<KeyType, ValueType, KeyComparator>;
+  using LeafPage = BPlusTreeLeafPage<KeyType, ValueType, KeyComparator, NumTombs>;
 
  public:
   explicit BPlusTree(std::string name, page_id_t header_page_id, BufferPoolManager *buffer_pool_manager,
@@ -127,6 +127,47 @@ class BPlusTree {
   void PrintTree(page_id_t page_id, const BPlusTreePage *page);
 
   auto ToPrintableBPlusTree(page_id_t root_id) -> PrintableBPlusTree;
+
+  // 在 leaf page 中二分查找第一个 >= key 的位置
+  auto LeafLowerBound(const LeafPage *leaf_page, const KeyType &key) const -> int;
+
+  // 在 internal page 中根据 separator key 找到应该继续访问的 child page_id
+  auto InternalLookup(const InternalPage *internal_page, const KeyType &key) const -> page_id_t;
+
+  // 以读模式从 root 到目标 leaf
+  auto FindLeafPageRead(const KeyType &key, bool leftmost = false) -> std::optional<ReadPageGuard>;
+
+  // 以写模式从 root 到目标 leaf，并把路径 guard 保存到 Context 中
+  void FindLeafPageWrite(const KeyType &key, Context *ctx, bool leftmost = false);
+
+  // 创建一个新 page，并返回新 page_id
+  auto AllocateNewPageId() -> page_id_t;
+
+  // leaf 满时先分裂 leaf，再把 key/value 插入到正确的 leaf 中
+  void SplitLeafAndInsert(Context *ctx, const KeyType &key, const ValueType &value);
+
+  // 将新 child 的 separator key 插入 parent；如果 parent 满，则递归分裂 internal page
+  void InsertIntoParent(Context *ctx, page_id_t old_child_page_id, const KeyType &separator_key, page_id_t new_child_page_id);
+
+  // 用给定的 key/value 数组重写 internal page，避免在满页上直接插入导致越界
+  void RewriteInternalPage(InternalPage *page, const std::vector<KeyType> &keys, const std::vector<page_id_t> &values);
+  
+  // Optimistic 删除：先读到目标 leaf；如果 leaf 不会 split，则只写 leaf 完成插入
+  // 返回 true 表示插入流程已经处理完；返回 false 表示 leaf 不安全，需要回退到保守写路径
+  auto TryOptimisticInsert(const KeyType &key, const ValueType &value) -> std::optional<bool>;
+
+  // 删除后 leaf underflow 时，尝试从兄弟节点借 entry；借不到则合并 leaf
+  void RebalanceLeafAfterDelete(Context *ctx);
+
+  // 从 internal parent 中移除第 remove_index 个 child 指针及对应 separator key
+  void RemoveChildFromInternal(InternalPage *parent, int remove_index);
+
+  // parent 是 root 且只剩一个 child 时，把唯一 child 提升为新 root
+  void AdjustRootAfterDelete(Context *ctx);
+
+  // Optimistic 删除：先读到目标 leaf；如果删除不会引起结构变化，则只写 leaf 完成删除
+  // 返回 true 表示删除流程已经处理完；返回 false 表示需要回退到保守写路径
+  auto TryOptimisticDelete(const KeyType &key) -> bool;
 
   // member variable
   std::string index_name_;

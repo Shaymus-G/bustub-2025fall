@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include <sstream>
+#include <cassert>
 
 #include "common/exception.h"
 #include "common/rid.h"
@@ -94,6 +95,22 @@ auto B_PLUS_TREE_LEAF_PAGE_TYPE::ValueAt(int index) const -> ValueType {
 }
 
 FULL_INDEX_TEMPLATE_ARGUMENTS
+auto B_PLUS_TREE_LEAF_PAGE_TYPE::KeyAtRef(int index) const -> const KeyType & {
+  // iterator 解引用时需要返回 key 引用，因此这里直接返回 key_array_ 中的元素
+  assert(index >= 0);
+  assert(index < GetSize());
+  return key_array_[index];
+}
+
+FULL_INDEX_TEMPLATE_ARGUMENTS
+auto B_PLUS_TREE_LEAF_PAGE_TYPE::ValueAtRef(int index) const -> const ValueType & {
+  // iterator 解引用时需要返回 value 引用，因此这里直接返回 rid_array_ 中的元素
+  assert(index >= 0);
+  assert(index < GetSize());
+  return rid_array_[index];
+}
+
+FULL_INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_LEAF_PAGE_TYPE::SetKeyAt(int index, const KeyType &key) {
   // 设置 key 时允许 index 指向当前 size 以内或即将插入的位置
   assert(index >= 0);
@@ -113,6 +130,13 @@ FULL_INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_LEAF_PAGE_TYPE::GetNumTombstones() const -> size_t {
   // 返回 tombstone buffer 当前使用量，便于 Remove 判断是否需要触发物理删除
   return num_tombstones_;
+}
+
+FULL_INDEX_TEMPLATE_ARGUMENTS
+auto B_PLUS_TREE_LEAF_PAGE_TYPE::GetMaxTombstones() const -> size_t {
+  // LEAF_PAGE_TOMB_CNT 是由模板参数 NumTombs 决定的编译期容量
+  // B+Tree 删除优化路径用它判断下一次 AddTombstone 是否会触发物理删除
+  return LEAF_PAGE_TOMB_CNT;
 }
 
 FULL_INDEX_TEMPLATE_ARGUMENTS
@@ -209,6 +233,79 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::DeleteAt(int index) {
     rid_array_[j - 1] = rid_array_[j];
   }
   ChangeSizeBy(-1);
+}
+
+FULL_INDEX_TEMPLATE_ARGUMENTS
+auto B_PLUS_TREE_LEAF_PAGE_TYPE::RemoveTombstoneForIndex(int index) -> bool {
+  // 重新插入已经 tombstone 的 key 时，只需要取消 tombstone 标记并更新 RID
+  assert(index >= 0);
+  assert(index < GetSize());
+  for (size_t i = 0; i < num_tombstones_; i++) {
+    if (static_cast<int>(tombstones_[i]) == index) {
+      RemoveTombstoneAt(i);
+      return true;
+    }
+  }
+  return false;
+}
+
+FULL_INDEX_TEMPLATE_ARGUMENTS
+void B_PLUS_TREE_LEAF_PAGE_TYPE::ApplyAllTombstones() {
+  // split / merge 前把 tombstone 全部物理删除
+  while (num_tombstones_ > 0) {
+    auto index = static_cast<int>(tombstones_[0]);
+    DeleteAt(index);
+  }
+}
+
+FULL_INDEX_TEMPLATE_ARGUMENTS
+auto B_PLUS_TREE_LEAF_PAGE_TYPE::TombstoneAt(size_t pos) const -> size_t {
+  // tombstone buffer 按 oldest -> newest 顺序保存物理下标
+  assert(pos < num_tombstones_);
+  return tombstones_[pos];
+}
+
+FULL_INDEX_TEMPLATE_ARGUMENTS
+void B_PLUS_TREE_LEAF_PAGE_TYPE::AppendTombstone(size_t index) {
+  // 搬移 tombstone 时追加到 buffer 尾部，表示它比当前已有 tombstone 更新
+  assert(static_cast<int>(index) >= 0);
+  assert(static_cast<int>(index) < GetSize());
+  if constexpr (LEAF_PAGE_TOMB_CNT == 0) {
+    DeleteAt(static_cast<int>(index));
+    return;
+  }
+  AddTombstone(static_cast<int>(index));
+}
+
+FULL_INDEX_TEMPLATE_ARGUMENTS
+void B_PLUS_TREE_LEAF_PAGE_TYPE::ClearTombstones() {
+  // source leaf 被合并走后，不再需要保留 tombstone 记录
+  num_tombstones_ = 0;
+}
+
+FULL_INDEX_TEMPLATE_ARGUMENTS
+void B_PLUS_TREE_LEAF_PAGE_TYPE::AddTombstoneByKey(const KeyType &key, const KeyComparator &comparator) {
+  // tombstone 迁移时不要复用旧下标，因为 AddTombstone 可能触发物理删除并改变数组位置
+  // 每次按 key 重新定位，可以保证 tombstone 最终指向正确 entry
+  for (int i = 0; i < GetSize(); i++) {
+    if (comparator(KeyAt(i), key) == 0) {
+      AddTombstone(i);
+      return;
+    }
+  }
+  BUSTUB_ENSURE(false, "tombstone key not found in leaf page");
+}
+
+FULL_INDEX_TEMPLATE_ARGUMENTS
+auto B_PLUS_TREE_LEAF_PAGE_TYPE::GetNumVisibleEntries() const -> int {
+  // 统计未被 tombstone 标记的 entry，用于判断逻辑上是否为空
+  int visible = 0;
+  for (int i = 0; i < GetSize(); i++) {
+    if (!IsTombstoned(i)) {
+      visible++;
+    }
+  }
+  return visible;
 }
 
 template class BPlusTreeLeafPage<GenericKey<4>, RID, GenericComparator<4>>;

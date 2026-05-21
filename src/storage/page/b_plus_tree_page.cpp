@@ -40,8 +40,8 @@ void BPlusTreePage::ChangeSizeBy(int amount) {
  */
 auto BPlusTreePage::GetMaxSize() const -> int { return max_size_; }
 void BPlusTreePage::SetMaxSize(int size) {
-  assert(max_size > 0);
-  max_size_ = max_size;
+  assert(size > 0);
+  max_size_ = size;
 }
 
 /*

@@ -17,7 +17,6 @@
 
 #include <algorithm>
 #include <limits>
-#include <mutex>
 #include <shared_mutex>
 #include <vector>
 
@@ -91,17 +90,20 @@ void CountMinSketch<KeyType>::Insert(const KeyType &item) {
   std::sort(lock_indices.begin(), lock_indices.end());
   // 如果某个item的哈希结果导致不同行的col相同，排序后会有重复索引，std::unique 可以在排序后移除重复项
   lock_indices.erase(std::unique(lock_indices.begin(), lock_indices.end()), lock_indices.end());
-  // 获取所有需要的写锁
-  std::vector<std::unique_lock<std::shared_mutex>> acquired_locks;
-  acquired_locks.reserve(lock_indices.size());
+  // 获取所有需要的写锁，由于lint限制不能使用 <mutex>，这里按固定顺序手动 lock 和 unlock
   for (size_t index : lock_indices) {
-    acquired_locks.emplace_back(locks_[index]);  // 获取每个锁的独占访问
+    locks_[index].lock();
   }
-  // 确保所有锁都获取后，再进行实际的计数更新
+
   for (size_t i = 0; i < depth_; ++i) {
-    size_t col = hash_functions_[i](item);  // 重新计算索引，确保正确对应
+    size_t col = hash_functions_[i](item);
     table_[i][col]++;
   }
+
+  for (auto iter = lock_indices.rbegin(); iter != lock_indices.rend(); ++iter) {
+    locks_[*iter].unlock();
+  }
+  // 确保所有锁都获取后，再进行实际的计数更新
 }
 
 template <typename KeyType>
@@ -111,18 +113,19 @@ void CountMinSketch<KeyType>::Merge(const CountMinSketch<KeyType> &other) {
   }
   /** @TODO(student) Implement this function! */
 
-  // 获取所有细粒度锁的写锁
-  std::vector<std::unique_lock<std::shared_mutex>> all_locks;
-  all_locks.reserve(depth_ * width_);
-  // 按照固定顺序获取所有锁的写锁
+  // 按固定顺序获取所有写锁，避免并发 Merge / Clear / Insert 死锁
   for (size_t i = 0; i < depth_ * width_; ++i) {
-    all_locks.emplace_back(locks_[i]);  // 获取每个锁的独占访问
+    locks_[i].lock();
   }
-  // 逐个位置累加
+
   for (size_t i = 0; i < depth_; ++i) {
     for (size_t j = 0; j < width_; ++j) {
       table_[i][j] += other.table_[i][j];
     }
+  }
+
+  for (size_t i = depth_ * width_; i > 0; --i) {
+    locks_[i - 1].unlock();
   }
 }
 
@@ -143,15 +146,17 @@ template <typename KeyType>
 void CountMinSketch<KeyType>::Clear() {
   /** @TODO(student) Implement this function! */
 
-  std::vector<std::unique_lock<std::shared_mutex>> all_locks;
-  all_locks.reserve(depth_ * width_);
-  // 按照固定顺序获取所有锁的写锁
+  // 按固定顺序获取所有写锁，避免并发 Clear / Insert / Merge 死锁
   for (size_t i = 0; i < depth_ * width_; ++i) {
-    all_locks.emplace_back(locks_[i]);
+    locks_[i].lock();
   }
-  // 重置表格为 0,由于已经持有全局写锁，这里不需要再获取细粒度锁
+
   for (auto &row : table_) {
     std::fill(row.begin(), row.end(), 0);
+  }
+
+  for (size_t i = depth_ * width_; i > 0; --i) {
+    locks_[i - 1].unlock();
   }
 }
 

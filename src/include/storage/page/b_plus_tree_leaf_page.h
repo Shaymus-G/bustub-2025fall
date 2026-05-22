@@ -100,7 +100,8 @@ class BPlusTreeLeafPage : public BPlusTreePage {
   auto RemoveTombstoneForIndex(int index) -> bool;
   // 将当前 leaf 中所有 pending tombstone 物理应用掉，便于 split 前简化数组状态
   void ApplyAllTombstones();
-  // 返回 tombstone buffer 当前保存的第 pos 个物理下标，用于 borrow/coalesce 时把 tombstone 从 source leaf 转移到 destination leaf
+  // 返回 tombstone buffer 当前保存的第 pos 个物理下标，用于 borrow/coalesce 时把 tombstone 从 source leaf 转移到
+  // destination leaf
   auto TombstoneAt(size_t pos) const -> size_t;
   // 向 tombstone buffer 追加一个已经确定的物理下标，用于搬移已有 tombstone
   void AppendTombstone(size_t index);

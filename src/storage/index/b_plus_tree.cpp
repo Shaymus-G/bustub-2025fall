@@ -10,8 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <functional>
 #include "storage/index/b_plus_tree.h"
+#include <functional>
 #include "buffer/traced_buffer_pool_manager.h"
 #include "storage/index/b_plus_tree_debug.h"
 
@@ -255,8 +255,7 @@ void BPLUSTREE_TYPE::SplitLeafAndInsert(Context *ctx, const KeyType &key, const 
   if (comparator_(key, new_leaf->KeyAt(0)) >= 0) {
     int insert_index = LeafLowerBound(new_leaf, key);
     new_leaf->InsertAt(insert_index, key, value);
-  }
-  else {
+  } else {
     int insert_index = LeafLowerBound(old_leaf, key);
     old_leaf->InsertAt(insert_index, key, value);
   }
@@ -460,8 +459,7 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key) {
   }
   if (leaf_page->GetMaxTombstones() == 0) {
     leaf_page->DeleteAt(index);
-  }
-  else {
+  } else {
     leaf_page->AddTombstone(index);
   }
   if (ctx.IsRootPage(leaf_page_id)) {
@@ -566,8 +564,7 @@ void BPLUSTREE_TYPE::RebalanceLeafAfterDelete(Context *ctx) {
       leaf->ApplyAllTombstones();
       header_page->root_page_id_ = INVALID_PAGE_ID;
       ctx->root_page_id_ = INVALID_PAGE_ID;
-    }
-    else {
+    } else {
       header_page->root_page_id_ = leaf_page_id;
       ctx->root_page_id_ = leaf_page_id;
     }
@@ -629,6 +626,12 @@ void BPLUSTREE_TYPE::RebalanceLeafAfterDelete(Context *ctx) {
     auto left = left_guard.template AsMut<LeafPage>();
     int left_old_size = left->GetSize();
     int leaf_size = leaf->GetSize();
+    // tombstone entry 物理上仍占用 slot
+    // 如果两个 leaf 的物理 size 合并后超过 max_size，不能强行 coalesce
+    // 否则 left->SetKeyAt(left_old_size + i, ...) 会写到 page 容量之外
+    if (left_old_size + leaf_size > left->GetMaxSize()) {
+      return;
+    }
     // 先保存 source tombstone 对应的 key，避免后续 AddTombstone 物理删除导致旧下标失效
     auto source_tombstone_keys = leaf->GetTombstones();
     for (int i = 0; i < leaf_size; i++) {
@@ -655,6 +658,12 @@ void BPLUSTREE_TYPE::RebalanceLeafAfterDelete(Context *ctx) {
     auto right = right_guard.template AsMut<LeafPage>();
     int leaf_old_size = leaf->GetSize();
     int right_size = right->GetSize();
+    // tombstone entry 物理上仍占用 slot
+    // 如果合并后的物理 size 超过 leaf max_size，不能强行 coalesce
+    // 否则 leaf->SetKeyAt(leaf_old_size + i, ...) 会写越界
+    if (leaf_old_size + right_size > leaf->GetMaxSize()) {
+      return;
+    }
     // 先保存 right leaf 的 tombstone key，避免合并后下标变化
     auto source_tombstone_keys = right->GetTombstones();
     for (int i = 0; i < right_size; i++) {
@@ -886,8 +895,7 @@ auto BPLUSTREE_TYPE::TryOptimisticDelete(const KeyType &key) -> bool {
   }
   if (write_leaf->GetMaxTombstones() == 0) {
     write_leaf->DeleteAt(write_index);
-  }
-  else {
+  } else {
     write_leaf->AddTombstone(write_index);
   }
   return true;

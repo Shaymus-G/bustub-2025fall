@@ -150,9 +150,7 @@ void ArcReplacer::RecordAccess(frame_id_t frame_id, page_id_t page_id, [[maybe_u
       size_t delta = (mfu_ghost_.empty()) ? 1 : std::max(static_cast<size_t>(1), mfu_ghost_.size() / mru_ghost_.size());
       mru_target_size_ = std::min(replacer_size_, mru_target_size_ + delta);
       mru_ghost_.erase(status->ghost_it_);
-    }
-    // 命中B2：说明MFU需要更多空间，减小p
-    else {
+    } else {  // 命中B2：说明MFU需要更多空间，减小p
       size_t delta = (mru_ghost_.empty()) ? 1 : std::max(static_cast<size_t>(1), mru_ghost_.size() / mfu_ghost_.size());
       mru_target_size_ = (mru_target_size_ >= delta) ? (mru_target_size_ - delta) : 0;
       mfu_ghost_.erase(status->ghost_it_);

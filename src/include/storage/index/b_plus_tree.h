@@ -147,11 +147,12 @@ class BPlusTree {
   void SplitLeafAndInsert(Context *ctx, const KeyType &key, const ValueType &value);
 
   // 将新 child 的 separator key 插入 parent；如果 parent 满，则递归分裂 internal page
-  void InsertIntoParent(Context *ctx, page_id_t old_child_page_id, const KeyType &separator_key, page_id_t new_child_page_id);
+  void InsertIntoParent(Context *ctx, page_id_t old_child_page_id, const KeyType &separator_key,
+                        page_id_t new_child_page_id);
 
   // 用给定的 key/value 数组重写 internal page，避免在满页上直接插入导致越界
   void RewriteInternalPage(InternalPage *page, const std::vector<KeyType> &keys, const std::vector<page_id_t> &values);
-  
+
   // Optimistic 插入：先读到目标 leaf；如果 leaf 不会 split，则只写 leaf 完成插入
   // 返回 true 表示插入流程已经处理完；返回 false 表示 leaf 不安全，需要回退到保守写路径
   auto TryOptimisticInsert(const KeyType &key, const ValueType &value) -> std::optional<bool>;

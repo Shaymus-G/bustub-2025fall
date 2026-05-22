@@ -34,6 +34,31 @@ INDEXITERATOR_TYPE::IndexIterator(std::shared_ptr<TracedBufferPoolManager> bpm, 
 }
 
 FULL_INDEX_TEMPLATE_ARGUMENTS
+INDEXITERATOR_TYPE::IndexIterator(const IndexIterator &other)
+    : bpm_(other.bpm_), index_(other.index_), is_end_(other.is_end_) {
+  // end iterator 不持有 leaf guard；非 end iterator 复制时重新读当前 leaf
+  if (!is_end_ && bpm_ != nullptr) {
+    leaf_guard_ = bpm_->ReadPage(other.leaf_guard_.GetPageId());
+  }
+}
+
+FULL_INDEX_TEMPLATE_ARGUMENTS
+auto INDEXITERATOR_TYPE::operator=(const IndexIterator &other) -> IndexIterator & {
+  // 复制赋值时先释放当前 guard，再重新读取 other 当前所在 leaf
+  if (this == &other) {
+    return *this;
+  }
+  leaf_guard_.Drop();
+  bpm_ = other.bpm_;
+  index_ = other.index_;
+  is_end_ = other.is_end_;
+  if (!is_end_ && bpm_ != nullptr) {
+    leaf_guard_ = bpm_->ReadPage(other.leaf_guard_.GetPageId());
+  }
+  return *this;
+}
+
+FULL_INDEX_TEMPLATE_ARGUMENTS
 INDEXITERATOR_TYPE::~IndexIterator() = default;  // NOLINT
 
 FULL_INDEX_TEMPLATE_ARGUMENTS
@@ -67,27 +92,25 @@ auto INDEXITERATOR_TYPE::operator++() -> INDEXITERATOR_TYPE & {
 
 FULL_INDEX_TEMPLATE_ARGUMENTS
 void INDEXITERATOR_TYPE::SkipTombstones() {
-  // 跳过 tombstone；如果当前 leaf 到尾，则读取下一个 leaf
+  // 跳过 tombstone；如果当前 leaf 到尾，则沿 next_page_id_ 读取下一个 leaf
+  using LeafPage = BPlusTreeLeafPage<KeyType, ValueType, KeyComparator, NumTombs>;
   while (!is_end_) {
-    using LeafPage = BPlusTreeLeafPage<KeyType, ValueType, KeyComparator, NumTombs>;
-    while (!is_end_) {
-      auto leaf_page = leaf_guard_.template As<LeafPage>();
-      while (index_ < leaf_page->GetSize() && leaf_page->IsTombstoned(index_)) {
-        index_++;
-      }
-      if (index_ < leaf_page->GetSize()) {
-        return;
-      }
-      page_id_t next_page_id = leaf_page->GetNextPageId();
-      if (next_page_id == INVALID_PAGE_ID) {
-        leaf_guard_.Drop();
-        is_end_ = true;
-        index_ = 0;
-        return;
-      }
-      leaf_guard_ = bpm_->ReadPage(next_page_id);
-      index_ = 0;
+    auto leaf_page = leaf_guard_.template As<LeafPage>();
+    while (index_ < leaf_page->GetSize() && leaf_page->IsTombstoned(index_)) {
+      index_++;
     }
+    if (index_ < leaf_page->GetSize()) {
+      return;
+    }
+    page_id_t next_page_id = leaf_page->GetNextPageId();
+    if (next_page_id == INVALID_PAGE_ID) {
+      leaf_guard_.Drop();
+      is_end_ = true;
+      index_ = 0;
+      return;
+    }
+    leaf_guard_ = bpm_->ReadPage(next_page_id);
+    index_ = 0;
   }
 }
 

@@ -37,6 +37,16 @@ class IndexIterator {
   // 用 leaf 的读 guard 构造 iterator，使 iterator 解引用时 page 数据仍被保护。
   IndexIterator(std::shared_ptr<TracedBufferPoolManager> bpm, ReadPageGuard leaf_guard, int index);
 
+  // 复制 iterator 时重新读取当前 leaf page，避免复制 PageGuard
+  IndexIterator(const IndexIterator &other);
+
+  // 复制赋值时释放当前 guard，并重新读取 other 所在的 leaf page
+  auto operator=(const IndexIterator &other) -> IndexIterator &;
+
+  // move 语义直接使用默认实现即可
+  IndexIterator(IndexIterator &&other) noexcept = default;
+  auto operator=(IndexIterator &&other) noexcept -> IndexIterator & = default;
+
   ~IndexIterator();  // NOLINT
 
   auto IsEnd() -> bool;

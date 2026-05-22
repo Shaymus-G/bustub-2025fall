@@ -10,7 +10,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <iostream>
 #include <functional>
 #include "storage/index/b_plus_tree.h"
 #include "buffer/traced_buffer_pool_manager.h"

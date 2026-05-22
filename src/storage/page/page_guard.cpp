@@ -154,7 +154,9 @@ void ReadPageGuard::Drop() {
   if (!is_valid_) {
     return;
   }
-  // 更新BPM元数据（需加全局锁保护原子性）
+
+  frame_->rwlatch_.unlock_shared();
+
   {
     std::scoped_lock<std::mutex> lock(*bpm_latch_);
     frame_->pin_count_--;
@@ -162,8 +164,7 @@ void ReadPageGuard::Drop() {
       replacer_->SetEvictable(frame_->frame_id_, true);
     }
   }
-  // 释放读锁并失效
-  frame_->rwlatch_.unlock_shared();
+
   is_valid_ = false;
 }
 
@@ -328,6 +329,8 @@ void WritePageGuard::Drop() {
     return;
   }
 
+  frame_->rwlatch_.unlock();
+
   {
     std::scoped_lock<std::mutex> lock(*bpm_latch_);
     frame_->pin_count_--;
@@ -336,7 +339,6 @@ void WritePageGuard::Drop() {
     }
   }
 
-  frame_->rwlatch_.unlock();
   is_valid_ = false;
 }
 

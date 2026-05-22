@@ -152,7 +152,7 @@ class BPlusTree {
   // 用给定的 key/value 数组重写 internal page，避免在满页上直接插入导致越界
   void RewriteInternalPage(InternalPage *page, const std::vector<KeyType> &keys, const std::vector<page_id_t> &values);
   
-  // Optimistic 删除：先读到目标 leaf；如果 leaf 不会 split，则只写 leaf 完成插入
+  // Optimistic 插入：先读到目标 leaf；如果 leaf 不会 split，则只写 leaf 完成插入
   // 返回 true 表示插入流程已经处理完；返回 false 表示 leaf 不安全，需要回退到保守写路径
   auto TryOptimisticInsert(const KeyType &key, const ValueType &value) -> std::optional<bool>;
 

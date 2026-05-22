@@ -160,6 +160,9 @@ class BPlusTree {
   // 删除后 leaf underflow 时，尝试从兄弟节点借 entry；借不到则合并 leaf
   void RebalanceLeafAfterDelete(Context *ctx);
 
+  // 删除 leaf 后，如果父 internal page 发生 underflow，则递归对 internal page 做 borrow / coalesce
+  void RebalanceInternalAfterDelete(Context *ctx, int internal_path_index);
+
   // 从 internal parent 中移除第 remove_index 个 child 指针及对应 separator key
   void RemoveChildFromInternal(InternalPage *parent, int remove_index);
 

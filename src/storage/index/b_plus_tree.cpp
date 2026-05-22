@@ -645,9 +645,14 @@ void BPLUSTREE_TYPE::RebalanceLeafAfterDelete(Context *ctx) {
     left->SetNextPageId(leaf->GetNextPageId());
     leaf->ClearTombstones();
     RemoveChildFromInternal(parent, child_index);
-    // 当前分支仍持有 left_guard；AdjustRootAfterDelete 可能再次写同一个 left page
+    // 当前分支仍持有 left_guard；AdjustRootAfterDelete 或 internal rebalance 可能再次写同一个 left page
     // 先释放 left_guard，避免同一线程重复加写锁导致死锁
     left_guard.Drop();
+    // leaf 合并会从 parent 中删除一个 child，如果 parent 不是 root 且发生 underflow，
+    // 必须递归处理 internal page，否则深层树删除后可能走错 child
+    if (!ctx->IsRootPage(parent_page_id) && parent->GetSize() < parent->GetMinSize()) {
+      RebalanceInternalAfterDelete(ctx, leaf_path_index - 1);
+    }
     AdjustRootAfterDelete(ctx);
     return;
   }
@@ -677,14 +682,153 @@ void BPLUSTREE_TYPE::RebalanceLeafAfterDelete(Context *ctx) {
     leaf->SetNextPageId(right->GetNextPageId());
     right->ClearTombstones();
     RemoveChildFromInternal(parent, child_index + 1);
-    // 当前分支仍持有 right_guard；AdjustRootAfterDelete 可能再次写同一个 right page
-    // 先释放 right_guard，避免同一线程重复加写锁导致死锁
+    // 当前分支仍持有 right_guard；AdjustRootAfterDelete 或 internal rebalance 可能再次写同一个 right page。
+    // 先释放 right_guard，避免同一线程重复加写锁导致死锁。
     right_guard.Drop();
+    // leaf 合并会从 parent 中删除一个 child；如果 parent 不是 root 且发生 underflow，
+    // 必须递归处理 internal page，否则深层树删除后可能走错 child。
+    if (!ctx->IsRootPage(parent_page_id) && parent->GetSize() < parent->GetMinSize()) {
+      RebalanceInternalAfterDelete(ctx, leaf_path_index - 1);
+    }
     AdjustRootAfterDelete(ctx);
     return;
   }
   // 理论上只有 root 收缩场景会没有 sibling；前面已经处理过 parent-root 单 child
   // 这里不再 abort，避免测试直接终止；保守地尝试调整 root
+  AdjustRootAfterDelete(ctx);
+}
+
+FULL_INDEX_TEMPLATE_ARGUMENTS
+void BPLUSTREE_TYPE::RebalanceInternalAfterDelete(Context *ctx, int internal_path_index) {
+  // 当前函数处理 internal page 的 underflow：优先左借，其次右借，最后合并
+  // 合并后如果 parent 继续 underflow，则递归向上处理
+  assert(internal_path_index >= 0);
+  auto curr = ctx->write_set_[internal_path_index].template AsMut<InternalPage>();
+  page_id_t curr_page_id = ctx->write_set_[internal_path_index].GetPageId();
+  // root internal 的收缩由 AdjustRootAfterDelete 统一处理
+  if (ctx->IsRootPage(curr_page_id)) {
+    AdjustRootAfterDelete(ctx);
+    return;
+  }
+  // 当前 internal page 已经满足最小 size，无需调整
+  if (curr->GetSize() >= curr->GetMinSize()) {
+    return;
+  }
+  assert(internal_path_index > 0);
+  auto parent = ctx->write_set_[internal_path_index - 1].template AsMut<InternalPage>();
+  page_id_t parent_page_id = ctx->write_set_[internal_path_index - 1].GetPageId();
+  int child_index = parent->ValueIndex(curr_page_id);
+  assert(child_index >= 0);
+  page_id_t left_page_id = child_index > 0 ? parent->ValueAt(child_index - 1) : INVALID_PAGE_ID;
+  page_id_t right_page_id = child_index + 1 < parent->GetSize() ? parent->ValueAt(child_index + 1) : INVALID_PAGE_ID;
+  // 优先从左 internal sibling 借最后一个 child
+  // 左 sibling 的最后一个 child 移到 curr 的最前面
+  // parent separator 下移到 curr->KeyAt(1)，左 sibling 最后一个 key 上移为新的 parent separator
+  if (left_page_id != INVALID_PAGE_ID) {
+    auto left_guard = bpm_->WritePage(left_page_id);
+    auto left = left_guard.template AsMut<InternalPage>();
+    if (left->GetSize() > left->GetMinSize()) {
+      int left_size = left->GetSize();
+      int curr_size = curr->GetSize();
+      page_id_t move_value = left->ValueAt(left_size - 1);
+      KeyType move_key = left->KeyAt(left_size - 1);
+      KeyType parent_sep = parent->KeyAt(child_index);
+      // curr 整体右移一格，为左 sibling 移来的 child 腾出 ValueAt(0)
+      for (int i = curr_size; i > 0; i--) {
+        curr->SetValueAt(i, curr->ValueAt(i - 1));
+        if (i > 1) {
+          curr->SetKeyAt(i, curr->KeyAt(i - 1));
+        }
+      }
+      curr->SetValueAt(0, move_value);
+      curr->SetKeyAt(1, parent_sep);
+      curr->SetSize(curr_size + 1);
+      left->SetSize(left_size - 1);
+      parent->SetKeyAt(child_index, move_key);
+      return;
+    }
+  }
+  // 左 sibling 不能借时，从右 internal sibling 借第一个 child
+  // parent separator 下移到 curr 的末尾；right 的 KeyAt(1) 上移为新的 parent separator
+  if (right_page_id != INVALID_PAGE_ID) {
+    auto right_guard = bpm_->WritePage(right_page_id);
+    auto right = right_guard.template AsMut<InternalPage>();
+    if (right->GetSize() > right->GetMinSize()) {
+      int curr_size = curr->GetSize();
+      int right_size = right->GetSize();
+      page_id_t move_value = right->ValueAt(0);
+      KeyType parent_sep = parent->KeyAt(child_index + 1);
+      KeyType new_parent_sep = right->KeyAt(1);
+      curr->SetValueAt(curr_size, move_value);
+      curr->SetKeyAt(curr_size, parent_sep);
+      curr->SetSize(curr_size + 1);
+      // 删除 right 的第 0 个 child，并把后续 child / separator 左移
+      for (int i = 1; i < right_size; i++) {
+        right->SetValueAt(i - 1, right->ValueAt(i));
+        if (i > 1) {
+          right->SetKeyAt(i - 1, right->KeyAt(i));
+        }
+      }
+      right->SetSize(right_size - 1);
+      parent->SetKeyAt(child_index + 1, new_parent_sep);
+      return;
+    }
+  }
+  // 左 sibling 存在时，把 curr 合并到左 sibling
+  // parent->KeyAt(child_index) 下移，作为 curr->ValueAt(0) 对应的 separator
+  if (left_page_id != INVALID_PAGE_ID) {
+    auto left_guard = bpm_->WritePage(left_page_id);
+    auto left = left_guard.template AsMut<InternalPage>();
+    int left_old_size = left->GetSize();
+    int curr_size = curr->GetSize();
+    // 正常 B+Tree 删除中，borrow 失败后应可 merge；这里保留容量保护，避免隐藏边界写越界
+    if (left_old_size + curr_size > left->GetMaxSize()) {
+      return;
+    }
+    left->SetValueAt(left_old_size, curr->ValueAt(0));
+    left->SetKeyAt(left_old_size, parent->KeyAt(child_index));
+    for (int i = 1; i < curr_size; i++) {
+      left->SetValueAt(left_old_size + i, curr->ValueAt(i));
+      left->SetKeyAt(left_old_size + i, curr->KeyAt(i));
+    }
+    left->SetSize(left_old_size + curr_size);
+    RemoveChildFromInternal(parent, child_index);
+    // 释放额外 sibling guard，避免后续 root 调整或递归过程中重复加写锁
+    left_guard.Drop();
+    if (!ctx->IsRootPage(parent_page_id) && parent->GetSize() < parent->GetMinSize()) {
+      RebalanceInternalAfterDelete(ctx, internal_path_index - 1);
+    }
+    AdjustRootAfterDelete(ctx);
+    return;
+  }
+  // 没有左 sibling 时，把右 sibling 合并到 curr
+  // parent->KeyAt(child_index + 1) 下移，作为 right->ValueAt(0) 对应的 separator
+  if (right_page_id != INVALID_PAGE_ID) {
+    auto right_guard = bpm_->WritePage(right_page_id);
+    auto right = right_guard.template AsMut<InternalPage>();
+    int curr_old_size = curr->GetSize();
+    int right_size = right->GetSize();
+    // 正常 B+Tree 删除中，borrow 失败后应可 merge；这里保留容量保护，避免隐藏边界写越界
+    if (curr_old_size + right_size > curr->GetMaxSize()) {
+      return;
+    }
+    curr->SetValueAt(curr_old_size, right->ValueAt(0));
+    curr->SetKeyAt(curr_old_size, parent->KeyAt(child_index + 1));
+    for (int i = 1; i < right_size; i++) {
+      curr->SetValueAt(curr_old_size + i, right->ValueAt(i));
+      curr->SetKeyAt(curr_old_size + i, right->KeyAt(i));
+    }
+    curr->SetSize(curr_old_size + right_size);
+    RemoveChildFromInternal(parent, child_index + 1);
+    // 释放额外 sibling guard，避免后续 root 调整或递归过程中重复加写锁
+    right_guard.Drop();
+    if (!ctx->IsRootPage(parent_page_id) && parent->GetSize() < parent->GetMinSize()) {
+      RebalanceInternalAfterDelete(ctx, internal_path_index - 1);
+    }
+    AdjustRootAfterDelete(ctx);
+    return;
+  }
+  // 理论上非 root internal page 一定有 sibling；兜底调整 root，避免异常中止
   AdjustRootAfterDelete(ctx);
 }
 

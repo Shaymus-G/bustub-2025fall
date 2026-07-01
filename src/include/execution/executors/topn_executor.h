@@ -13,9 +13,11 @@
 #pragma once
 
 #include <memory>
+#include <queue>
 #include <utility>
 #include <vector>
 
+#include "execution/execution_common.h"
 #include "execution/executor_context.h"
 #include "execution/executors/abstract_executor.h"
 #include "execution/plans/seq_scan_plan.h"
@@ -52,5 +54,13 @@ class TopNExecutor : public AbstractExecutor {
   const TopNPlanNode *plan_;
   /** The child executor from which tuples are obtained */
   std::unique_ptr<AbstractExecutor> child_executor_;
+  /** TopN 使用的 tuple 比较器。 */
+  TupleComparator cmp_;
+  /** 保存当前最优的 N 条记录，堆顶是当前保留结果中最差的一条。 */
+  std::priority_queue<SortEntry, std::vector<SortEntry>, TupleComparator> top_entries_;
+  /** 最终按 ORDER BY 顺序输出的 tuple。 */
+  std::vector<Tuple> result_tuples_;
+  /** 当前输出到 result_tuples_ 的位置。 */
+  size_t cursor_{0};
 };
 }  // namespace bustub

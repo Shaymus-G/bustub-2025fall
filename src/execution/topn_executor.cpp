@@ -11,6 +11,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "execution/executors/topn_executor.h"
+#include <algorithm>
+#include <memory>
+#include <utility>
+#include <vector>
+#include "common/exception.h"
 
 namespace bustub {
 
@@ -21,10 +26,58 @@ namespace bustub {
  */
 TopNExecutor::TopNExecutor(ExecutorContext *exec_ctx, const TopNPlanNode *plan,
                            std::unique_ptr<AbstractExecutor> &&child_executor)
-    : AbstractExecutor(exec_ctx) {}
+    : AbstractExecutor(exec_ctx),
+      plan_(plan),
+      child_executor_(std::move(child_executor)),
+      cmp_(plan->GetOrderBy()),
+      top_entries_(cmp_) {}
 
 /** Initialize the TopN */
-void TopNExecutor::Init() { throw NotImplementedException("TopNExecutor is not implemented"); }
+void TopNExecutor::Init() {
+  child_executor_->Init();
+
+  top_entries_ = std::priority_queue<SortEntry, std::vector<SortEntry>, TupleComparator>(cmp_);
+  result_tuples_.clear();
+  cursor_ = 0;
+
+  std::vector<Tuple> child_tuples;
+  std::vector<RID> child_rids;
+
+  while (child_executor_->Next(&child_tuples, &child_rids, BUSTUB_BATCH_SIZE)) {
+    for (const auto &tuple : child_tuples) {
+      SortEntry entry{GenerateSortKey(tuple, plan_->GetOrderBy(), child_executor_->GetOutputSchema()), tuple};
+
+      if (top_entries_.size() < plan_->GetN()) {
+        top_entries_.push(entry);
+        continue;
+      }
+
+      if (plan_->GetN() == 0) {
+        continue;
+      }
+
+      if (cmp_(entry, top_entries_.top())) {
+        top_entries_.pop();
+        top_entries_.push(entry);
+      }
+    }
+  }
+
+  std::vector<SortEntry> entries;
+  entries.reserve(top_entries_.size());
+
+  while (!top_entries_.empty()) {
+    entries.push_back(top_entries_.top());
+    top_entries_.pop();
+  }
+
+  std::sort(entries.begin(), entries.end(), cmp_);
+
+  result_tuples_.reserve(entries.size());
+  for (const auto &entry : entries) {
+    result_tuples_.push_back(entry.second);
+  }
+}
 
 /**
  * Yield the next tuple batch from the TopN.
@@ -35,9 +88,18 @@ void TopNExecutor::Init() { throw NotImplementedException("TopNExecutor is not i
  */
 auto TopNExecutor::Next(std::vector<bustub::Tuple> *tuple_batch, std::vector<bustub::RID> *rid_batch, size_t batch_size)
     -> bool {
-  return false;
+  tuple_batch->clear();
+  rid_batch->clear();
+
+  while (cursor_ < result_tuples_.size() && tuple_batch->size() < batch_size) {
+    tuple_batch->push_back(result_tuples_[cursor_]);
+    rid_batch->emplace_back();
+    cursor_++;
+  }
+
+  return !tuple_batch->empty();
 }
 
-auto TopNExecutor::GetNumInHeap() -> size_t { throw NotImplementedException("TopNExecutor is not implemented"); };
+auto TopNExecutor::GetNumInHeap() -> size_t { return top_entries_.size(); };
 
 }  // namespace bustub

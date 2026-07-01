@@ -11,6 +11,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "execution/executors/limit_executor.h"
+#include <algorithm>
+#include <memory>
+#include <vector>
 #include "common/macros.h"
 
 namespace bustub {
@@ -23,12 +26,13 @@ namespace bustub {
  */
 LimitExecutor::LimitExecutor(ExecutorContext *exec_ctx, const LimitPlanNode *plan,
                              std::unique_ptr<AbstractExecutor> &&child_executor)
-    : AbstractExecutor(exec_ctx) {
-  UNIMPLEMENTED("TODO(P3): Add implementation.");
-}
+    : AbstractExecutor(exec_ctx), plan_(plan), child_executor_(std::move(child_executor)) {}
 
 /** Initialize the limit */
-void LimitExecutor::Init() { UNIMPLEMENTED("TODO(P3): Add implementation."); }
+void LimitExecutor::Init() {
+  child_executor_->Init();
+  emitted_count_ = 0;
+}
 
 /**
  * Yield the next tuple batch from the limit.
@@ -39,7 +43,33 @@ void LimitExecutor::Init() { UNIMPLEMENTED("TODO(P3): Add implementation."); }
  */
 auto LimitExecutor::Next(std::vector<bustub::Tuple> *tuple_batch, std::vector<bustub::RID> *rid_batch,
                          size_t batch_size) -> bool {
-  UNIMPLEMENTED("TODO(P3): Add implementation.");
+  tuple_batch->clear();
+  rid_batch->clear();
+
+  if (emitted_count_ >= plan_->GetLimit()) {
+    return false;
+  }
+
+  std::vector<Tuple> child_tuples;
+  std::vector<RID> child_rids;
+
+  while (tuple_batch->size() < batch_size && emitted_count_ < plan_->GetLimit()) {
+    const auto remaining_limit = plan_->GetLimit() - emitted_count_;
+    const auto request_size = std::min(batch_size - tuple_batch->size(), remaining_limit);
+
+    if (!child_executor_->Next(&child_tuples, &child_rids, request_size)) {
+      break;
+    }
+
+    for (size_t i = 0;
+         i < child_tuples.size() && tuple_batch->size() < batch_size && emitted_count_ < plan_->GetLimit(); i++) {
+      tuple_batch->push_back(child_tuples[i]);
+      rid_batch->push_back(child_rids[i]);
+      emitted_count_++;
+    }
+  }
+
+  return !tuple_batch->empty();
 }
 
 }  // namespace bustub

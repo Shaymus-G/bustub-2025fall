@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <memory>
 #include <vector>
 
@@ -79,5 +80,11 @@ class WindowFunctionExecutor : public AbstractExecutor {
 
   /** The child executor from which tuples are obtained */
   std::unique_ptr<AbstractExecutor> child_executor_;
+
+  /** 物化后的窗口函数输出结果。 */
+  std::vector<Tuple> result_tuples_;
+
+  /** 当前输出到 result_tuples_ 的位置。 */
+  size_t cursor_{0};
 };
 }  // namespace bustub

@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <memory>
 #include <utility>
@@ -128,6 +129,14 @@ class ExternalMergeSortExecutor : public AbstractExecutor {
   TupleComparator cmp_;
 
   /** TODO(P3): You will want to add your own private members here. */
+  /** 子执行器。 */
+  std::unique_ptr<AbstractExecutor> child_executor_;
+
+  /** 排序后的 tuple。 */
+  std::vector<Tuple> sorted_tuples_;
+
+  /** 当前输出到 sorted_tuples_ 的位置。 */
+  size_t cursor_{0};
 };
 
 }  // namespace bustub

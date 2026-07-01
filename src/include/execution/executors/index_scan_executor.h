@@ -12,8 +12,10 @@
 
 #pragma once
 
+#include <memory>
 #include <vector>
 
+#include "catalog/catalog.h"
 #include "common/rid.h"
 #include "execution/executor_context.h"
 #include "execution/executors/abstract_executor.h"
@@ -40,5 +42,17 @@ class IndexScanExecutor : public AbstractExecutor {
  private:
   /** The index scan plan node to be executed. */
   const IndexScanPlanNode *plan_;
+
+  /** 目标表的元数据。 */
+  std::shared_ptr<TableInfo> table_info_;
+
+  /** 索引的元数据。 */
+  std::shared_ptr<IndexInfo> index_info_;
+
+  /** 通过索引扫描得到的 RID 结果。 */
+  std::vector<RID> result_rids_;
+
+  /** 当前扫描到 result_rids_ 中的位置。 */
+  size_t cursor_{0};
 };
 }  // namespace bustub

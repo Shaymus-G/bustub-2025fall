@@ -15,6 +15,7 @@
 #include <memory>
 #include <vector>
 
+#include "catalog/catalog.h"
 #include "execution/executor_context.h"
 #include "execution/executors/abstract_executor.h"
 #include "execution/plans/insert_plan.h"
@@ -42,6 +43,18 @@ class InsertExecutor : public AbstractExecutor {
  private:
   /** The insert plan node to be executed*/
   const InsertPlanNode *plan_;
+
+  /** 产生待插入 tuple 的子执行器。 */
+  std::unique_ptr<AbstractExecutor> child_executor_;
+
+  /** 目标表的元数据。 */
+  std::shared_ptr<TableInfo> table_info_;
+
+  /** 目标表上的所有索引。 */
+  std::vector<std::shared_ptr<IndexInfo>> indexes_;
+
+  /** InsertExecutor::Next() 只能输出一次插入行数。 */
+  bool emitted_{false};
 };
 
 }  // namespace bustub

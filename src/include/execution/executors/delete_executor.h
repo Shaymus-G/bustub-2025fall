@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include "catalog/catalog.h"
 #include "execution/executor_context.h"
 #include "execution/executors/abstract_executor.h"
 #include "execution/plans/delete_plan.h"
@@ -46,5 +47,14 @@ class DeleteExecutor : public AbstractExecutor {
 
   /** The child executor from which RIDs for deleted tuples are pulled */
   std::unique_ptr<AbstractExecutor> child_executor_;
+
+  /** 目标表的元数据。 */
+  std::shared_ptr<TableInfo> table_info_;
+
+  /** 目标表上的所有索引。 */
+  std::vector<std::shared_ptr<IndexInfo>> indexes_;
+
+  /** DeleteExecutor::Next() 只能输出一次删除行数。 */
+  bool emitted_{false};
 };
 }  // namespace bustub

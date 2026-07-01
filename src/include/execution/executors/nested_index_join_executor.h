@@ -15,6 +15,7 @@
 #include <memory>
 #include <vector>
 
+#include "catalog/catalog.h"
 #include "execution/executor_context.h"
 #include "execution/executors/abstract_executor.h"
 #include "execution/plans/nested_index_join_plan.h"
@@ -41,5 +42,20 @@ class NestedIndexJoinExecutor : public AbstractExecutor {
  private:
   /** The nested index join plan node. */
   const NestedIndexJoinPlanNode *plan_;
+
+  /** 外表子执行器。 */
+  std::unique_ptr<AbstractExecutor> child_executor_;
+
+  /** 内表元数据。 */
+  std::shared_ptr<TableInfo> inner_table_info_;
+
+  /** 内表索引元数据。 */
+  std::shared_ptr<IndexInfo> index_info_;
+
+  /** 物化后的连接结果。 */
+  std::vector<Tuple> result_tuples_;
+
+  /** 当前输出到 result_tuples_ 的位置。 */
+  size_t cursor_{0};
 };
 }  // namespace bustub

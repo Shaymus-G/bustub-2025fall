@@ -13,6 +13,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -69,17 +70,40 @@ class SimpleAggregationHashTable {
    */
   void CombineAggregateValues(AggregateValue *result, const AggregateValue &input) {
     for (uint32_t i = 0; i < agg_exprs_.size(); i++) {
+      const auto &input_value = input.aggregates_[i];
+      auto &result_value = result->aggregates_[i];
+
       switch (agg_types_[i]) {
         case AggregationType::CountStarAggregate:
+          result_value = result_value.Add(ValueFactory::GetIntegerValue(1));
+          break;
+
         case AggregationType::CountAggregate:
+          if (!input_value.IsNull()) {
+            result_value = result_value.IsNull() ? ValueFactory::GetIntegerValue(1)
+                                                 : result_value.Add(ValueFactory::GetIntegerValue(1));
+          }
+          break;
+
         case AggregationType::SumAggregate:
+          if (!input_value.IsNull()) {
+            result_value = result_value.IsNull() ? input_value : result_value.Add(input_value);
+          }
+          break;
+
         case AggregationType::MinAggregate:
+          if (!input_value.IsNull()) {
+            result_value = result_value.IsNull() ? input_value : result_value.Min(input_value);
+          }
+          break;
+
         case AggregationType::MaxAggregate:
+          if (!input_value.IsNull()) {
+            result_value = result_value.IsNull() ? input_value : result_value.Max(input_value);
+          }
           break;
       }
     }
-
-    UNIMPLEMENTED("TODO(P3): Add implementation.");
   }
 
   /**
@@ -98,6 +122,13 @@ class SimpleAggregationHashTable {
    * Clear the hash table
    */
   void Clear() { ht_.clear(); }
+
+  /** 在空输入且没有 GROUP BY 时，插入一条初始聚合结果。 */
+  void InsertInitial(const AggregateKey &agg_key) {
+    if (ht_.count(agg_key) == 0) {
+      ht_.insert({agg_key, GenerateInitialAggregateValue()});
+    }
+  }
 
   /** An iterator over the aggregation hash table */
   class Iterator {
@@ -189,9 +220,9 @@ class AggregationExecutor : public AbstractExecutor {
   std::unique_ptr<AbstractExecutor> child_executor_;
 
   /** Simple aggregation hash table */
-  // TODO(Student): Uncomment SimpleAggregationHashTable aht_;
+  SimpleAggregationHashTable aht_;
 
   /** Simple aggregation hash table iterator */
-  // TODO(Student): Uncomment SimpleAggregationHashTable::Iterator aht_iterator_;
+  std::optional<SimpleAggregationHashTable::Iterator> aht_iterator_;
 };
 }  // namespace bustub

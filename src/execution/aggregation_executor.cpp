@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include <memory>
+#include <vector>
 #include "common/macros.h"
 
 #include "execution/executors/aggregation_executor.h"
@@ -25,12 +26,35 @@ namespace bustub {
  */
 AggregationExecutor::AggregationExecutor(ExecutorContext *exec_ctx, const AggregationPlanNode *plan,
                                          std::unique_ptr<AbstractExecutor> &&child_executor)
-    : AbstractExecutor(exec_ctx) {
-  UNIMPLEMENTED("TODO(P3): Add implementation.");
-}
+    : AbstractExecutor(exec_ctx),
+      plan_(plan),
+      child_executor_(std::move(child_executor)),
+      aht_(plan_->GetAggregates(), plan_->GetAggregateTypes()) {}
 
 /** Initialize the aggregation */
-void AggregationExecutor::Init() { UNIMPLEMENTED("TODO(P3): Add implementation."); }
+void AggregationExecutor::Init() {
+  child_executor_->Init();
+  aht_.Clear();
+
+  bool has_input = false;
+
+  std::vector<Tuple> child_tuples;
+  std::vector<RID> child_rids;
+
+  while (child_executor_->Next(&child_tuples, &child_rids, BUSTUB_BATCH_SIZE)) {
+    for (const auto &tuple : child_tuples) {
+      has_input = true;
+      aht_.InsertCombine(MakeAggregateKey(&tuple), MakeAggregateValue(&tuple));
+    }
+  }
+
+  // 没有 GROUP BY 的空输入仍然需要输出一条初始聚合结果，例如 COUNT(*) = 0。
+  if (!has_input && plan_->GetGroupBys().empty()) {
+    aht_.InsertInitial(AggregateKey{{}});
+  }
+
+  aht_iterator_.emplace(aht_.Begin());
+}
 
 /**
  * Yield the next tuple batch from the aggregation.
@@ -42,7 +66,35 @@ void AggregationExecutor::Init() { UNIMPLEMENTED("TODO(P3): Add implementation."
 
 auto AggregationExecutor::Next(std::vector<bustub::Tuple> *tuple_batch, std::vector<bustub::RID> *rid_batch,
                                size_t batch_size) -> bool {
-  UNIMPLEMENTED("TODO(P3): Add implementation.");
+  tuple_batch->clear();
+  rid_batch->clear();
+
+  if (!aht_iterator_.has_value()) {
+    return false;
+  }
+
+  while (*aht_iterator_ != aht_.End() && tuple_batch->size() < batch_size) {
+    std::vector<Value> values;
+    const auto &key = aht_iterator_->Key();
+    const auto &val = aht_iterator_->Val();
+
+    values.reserve(key.group_bys_.size() + val.aggregates_.size());
+
+    for (const auto &group_by_value : key.group_bys_) {
+      values.emplace_back(group_by_value);
+    }
+
+    for (const auto &aggregate_value : val.aggregates_) {
+      values.emplace_back(aggregate_value);
+    }
+
+    tuple_batch->emplace_back(values, &GetOutputSchema());
+    rid_batch->emplace_back();
+
+    ++(*aht_iterator_);
+  }
+
+  return !tuple_batch->empty();
 }
 
 /** Do not use or remove this function; otherwise, you will get zero points. */

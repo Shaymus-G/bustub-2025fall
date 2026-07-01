@@ -25,7 +25,6 @@ namespace bustub {
  * @brief optimize sort + limit as top N
  */
 auto Optimizer::OptimizeSortLimitAsTopN(const AbstractPlanNodeRef &plan) -> AbstractPlanNodeRef {
-  // TODO(student): implement sort + limit -> top N optimizer rule
   std::vector<AbstractPlanNodeRef> children;
   for (const auto &child : plan->GetChildren()) {
     children.emplace_back(OptimizeSortLimitAsTopN(child));
@@ -38,6 +37,11 @@ auto Optimizer::OptimizeSortLimitAsTopN(const AbstractPlanNodeRef &plan) -> Abst
   }
 
   const auto &limit_plan = dynamic_cast<const LimitPlanNode &>(*optimized_plan);
+
+  if (limit_plan.GetLimit() >= 1000) {
+    return optimized_plan;
+  }
+
   auto sort_child = limit_plan.GetChildPlan();
 
   if (sort_child->GetType() != PlanType::Sort) {

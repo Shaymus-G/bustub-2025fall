@@ -27,7 +27,6 @@ auto Optimizer::Optimize(const AbstractPlanNodeRef &plan) -> AbstractPlanNodeRef
     p = OptimizeOrderByAsIndexScan(p);
     p = OptimizeMergeFilterScan(p);
     p = OptimizeSeqScanAsIndexScan(p);
-    p = OptimizeSortLimitAsTopN(p);
     return p;
   }
   // By default, use user-defined rules.
